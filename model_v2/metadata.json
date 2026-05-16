@@ -1,0 +1,37 @@
+{
+  "backbone": "facebook/wav2vec2-base-960h",
+  "embedding_dim": 1536,
+  "pooling": "mean_std",
+  "class_labels": [
+    "aphasia",
+    "control",
+    "dysarthria",
+    "ua_speech"
+  ],
+  "n_classes": 4,
+  "total_samples": 732,
+  "n_speakers": 70,
+  "class_counts": {
+    "aphasia": 150,
+    "control": 4095,
+    "dysarthria": 2768,
+    "ua_speech": 150
+  },
+  "class_weights": {
+    "aphasia": 1.2936893203883495,
+    "control": 1.3880208333333333,
+    "dysarthria": 0.5896017699115044,
+    "ua_speech": 1.2337962962962963
+  },
+  "speaker_disjoint_splits": true,
+  "isotonic_calibration": true,
+  "test_accuracy": 0.905511811023622,
+  "test_ece": 0.09785811380138545,
+  "improvements_over_v1": [
+    "Wav2Vec2 embeddings (768-dim contextual) replace 32 MFCC features",
+    "Speaker-disjoint train/test split \u2014 no within-speaker leakage",
+    "Balanced class weights + label smoothing",
+    "Isotonic calibration for trustworthy probabilities",
+    "Silero VAD + bandpass + LUFS normalisation preprocessing"
+  ]
+}

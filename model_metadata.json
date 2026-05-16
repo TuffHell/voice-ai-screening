@@ -1,0 +1,22 @@
+{
+  "model_architecture": "Dense Neural Network with Batch Normalization",
+  "input_features": "MFCCs (13) + Spectral Features (noise-reduced)",
+  "feature_dimension": 32,
+  "num_classes": 4,
+  "class_labels": [
+    "aphasia",
+    "control",
+    "dysarthria",
+    "ua_speech"
+  ],
+  "training_accuracy": 0.9858611226081848,
+  "test_accuracy": 0.9848428964614868,
+  "test_loss": 0.03884068503975868,
+  "sample_rate": 16000,
+  "total_samples": 161966,
+  "datasets": {
+    "TORGO": 17606,
+    "UA_Speech": 143290,
+    "APROCSA": 1070
+  }
+}
