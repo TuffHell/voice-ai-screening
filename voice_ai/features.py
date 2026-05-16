@@ -69,45 +69,34 @@ def _estimate_f0(audio: np.ndarray, sr: int) -> np.ndarray:
     return f0_voiced[~np.isnan(f0_voiced)]
 
 
-def _jitter(f0: np.ndarray) -> float:
-    """Local jitter: mean |ΔT| / mean(T) as a percentage."""
-    if len(f0) < 3:
-        return 0.0
-    periods = 1.0 / (f0 + 1e-9)
-    return float(np.mean(np.abs(np.diff(periods))) / np.mean(periods) * 100)
+def _praat_indicators(audio: np.ndarray, sr: int):
+    """
+    Cycle-by-cycle jitter, shimmer, and HNR via Praat (parselmouth).
 
-
-def _shimmer(audio: np.ndarray, sr: int) -> float:
-    """Local shimmer: mean |ΔA| / mean(A) as a percentage (frame-level RMS proxy)."""
-    frame_len = int(sr * 0.025)
-    hop_len   = int(sr * 0.010)
-    rms = librosa.feature.rms(y=audio, frame_length=frame_len, hop_length=hop_len)[0]
-    rms = rms[rms > 1e-6]
-    if len(rms) < 3:
-        return 0.0
-    return float(np.mean(np.abs(np.diff(rms))) / np.mean(rms) * 100)
-
-
-def _hnr(audio: np.ndarray, sr: int) -> float:
-    """Harmonics-to-Noise Ratio via autocorrelation (dB)."""
-    frame_len = int(sr * 0.040)
-    hop_len   = int(sr * 0.010)
+    Praat's `Get jitter (local)` and `Get shimmer (local)` are the clinical
+    gold standard (Boersma & Weenink). Returns (jitter_pct, shimmer_pct, hnr_db)
+    or (None, None, None) on failure.
+    """
     try:
-        frames = librosa.util.frame(audio, frame_length=frame_len, hop_length=hop_len)
+        import parselmouth
+        from parselmouth.praat import call
     except Exception:
-        return 0.0
-    hnr_vals = []
-    lo, hi = int(sr / 500), int(sr / 75)
-    for frame in frames.T:
-        ac = np.correlate(frame, frame, mode='full')
-        ac = ac[len(ac) // 2:]
-        if ac[0] <= 0 or hi >= len(ac):
-            continue
-        peak = np.max(ac[lo:hi])
-        r = peak / ac[0]
-        if 0 < r < 1:
-            hnr_vals.append(10 * np.log10(r / (1 - r)))
-    return float(np.mean(hnr_vals)) if hnr_vals else 0.0
+        return None, None, None
+    try:
+        snd = parselmouth.Sound(audio.astype(np.float64), sampling_frequency=sr)
+        point_process = call(snd, "To PointProcess (periodic, cc)", 75, 500)
+        # Praat returns fractions in [0, 1]; convert to %
+        jit = call(point_process, "Get jitter (local)", 0, 0, 0.0001, 0.02, 1.3)
+        shi = call([snd, point_process], "Get shimmer (local)",
+                   0, 0, 0.0001, 0.02, 1.3, 1.6)
+        harm = call(snd, "To Harmonicity (cc)", 0.01, 75, 0.1, 1.0)
+        hnr  = call(harm, "Get mean", 0, 0)
+        jit_pct = float(jit) * 100 if jit is not None and not np.isnan(jit) else 0.0
+        shi_pct = float(shi) * 100 if shi is not None and not np.isnan(shi) else 0.0
+        hnr_db  = float(hnr)        if hnr is not None and not np.isnan(hnr) else 0.0
+        return jit_pct, shi_pct, hnr_db
+    except Exception:
+        return None, None, None
 
 
 def _speech_rate(audio: np.ndarray, sr: int) -> float:
@@ -131,10 +120,11 @@ def extract_clinical_indicators(audio: np.ndarray, sr: int = SAMPLE_RATE) -> Cli
     Audio should be at least 1 second long for reliable estimates.
     """
     f0 = _estimate_f0(audio, sr)
+    jit, shi, hnr = _praat_indicators(audio, sr)
     return ClinicalIndicators(
-        jitter_pct     = round(_jitter(f0), 4),
-        shimmer_pct    = round(_shimmer(audio, sr), 4),
-        hnr_db         = round(_hnr(audio, sr), 2),
+        jitter_pct     = round(jit if jit is not None else 0.0, 4),
+        shimmer_pct    = round(shi if shi is not None else 0.0, 4),
+        hnr_db         = round(hnr if hnr is not None else 0.0, 2),
         f0_mean_hz     = round(float(np.mean(f0)), 1)  if len(f0) > 0 else 0.0,
         f0_range_hz    = round(float(np.ptp(f0)), 1)   if len(f0) > 0 else 0.0,
         speech_rate_est= round(_speech_rate(audio, sr), 2),
