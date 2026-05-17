@@ -9,24 +9,24 @@
     "ua_speech"
   ],
   "n_classes": 4,
-  "total_samples": 732,
-  "n_speakers": 70,
+  "total_samples": 757,
+  "n_speakers": 71,
   "class_counts": {
-    "aphasia": 150,
+    "aphasia": 197,
     "control": 4095,
     "dysarthria": 2768,
     "ua_speech": 150
   },
   "class_weights": {
-    "aphasia": 1.2936893203883495,
-    "control": 1.3880208333333333,
-    "dysarthria": 0.5896017699115044,
-    "ua_speech": 1.2337962962962963
+    "aphasia": 1.081439393939394,
+    "control": 1.3859223300970873,
+    "dysarthria": 0.6260964912280702,
+    "ua_speech": 1.3217592592592593
   },
   "speaker_disjoint_splits": true,
   "isotonic_calibration": true,
-  "test_accuracy": 0.905511811023622,
-  "test_ece": 0.09785811380138545,
+  "test_accuracy": 0.8373983739837398,
+  "test_ece": 0.10929743836565717,
   "improvements_over_v1": [
     "Wav2Vec2 embeddings (768-dim contextual) replace 32 MFCC features",
     "Speaker-disjoint train/test split \u2014 no within-speaker leakage",
