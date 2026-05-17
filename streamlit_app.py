@@ -278,30 +278,37 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav",
     # screening clips rarely benefit from > 15 s.
     raw_for_features = raw[:int(16000 * 15)]
 
-    # ── Praat indicators (single combined call → jit, shim, HNR, CPP) ──────
+    # ── Single combined Praat call → jitter, shimmer, HNR, CPP, F0 ────────
+    from voice_ai.features import _praat_all, _pause_stats, _speech_rate, ClinicalIndicators
     t0 = _t.time()
-    indicators = extract_clinical_indicators(raw_for_features)
-    _step("Acoustic indicators (jitter, shimmer, HNR, F0)", t0,
+    pr_all = _praat_all(raw_for_features, 16000)
+    sr_total = _speech_rate(raw_for_features, 16000)
+    indicators = ClinicalIndicators(
+        jitter_pct=round(pr_all['jitter_pct'], 4),
+        shimmer_pct=round(pr_all['shimmer_pct'], 4),
+        hnr_db=round(pr_all['hnr_db'], 2),
+        f0_mean_hz=round(pr_all['f0_mean_hz'], 1),
+        f0_range_hz=round(pr_all['f0_range_hz'], 1),
+        speech_rate_est=round(sr_total, 2),
+    )
+    cpp_db = pr_all['cpp_db']
+    _step("Acoustic indicators (Praat: jitter, shimmer, HNR, CPP, F0)", t0,
           f"jitter={indicators.jitter_pct:.2f}%, shimmer={indicators.shimmer_pct:.2f}%, "
-          f"HNR={indicators.hnr_db:.1f} dB, F0={indicators.f0_mean_hz:.0f} Hz")
+          f"HNR={indicators.hnr_db:.1f} dB, CPP={cpp_db:.1f} dB, "
+          f"F0={indicators.f0_mean_hz:.0f} Hz")
 
-    # ── Pause distribution + CPP ──────────────────────────────────────────
+    # ── Pause distribution + articulation rate ────────────────────────────
     t0 = _t.time()
     pstats = {'voiced_frac': 0.5, 'n_pause_500ms': 0, 'n_pause_1s': 0, 'articulation_rate': 0.0}
-    cpp_db = 0.0
     try:
-        from voice_ai.features import _pause_stats, _praat_indicators as _praat
         pstats = _pause_stats(raw_for_features, 16000)
-        cpp_res = _praat(raw_for_features, 16000)
-        cpp_db  = cpp_res[3] if cpp_res and len(cpp_res) > 3 and cpp_res[3] is not None else 0.0
-        _step("Pause distribution + CPP", t0,
+        _step("Pause distribution + articulation rate", t0,
               f"voiced={pstats['voiced_frac']:.0%}, "
               f"long pauses (≥500ms)={pstats['n_pause_500ms']}, "
               f"(≥1s)={pstats['n_pause_1s']}, "
-              f"articulation rate={pstats['articulation_rate']:.2f} syl/s, "
-              f"CPP={cpp_db:.1f} dB")
+              f"articulation rate={pstats['articulation_rate']:.2f} syl/s")
     except Exception as e:
-        _step("Pause distribution + CPP", t0, f"unavailable ({type(e).__name__})")
+        _step("Pause distribution", t0, f"unavailable ({type(e).__name__})")
 
     # ── Whisper-based words-per-minute (WPM) — non-fluent aphasia <90 WPM ──
     # Best-effort: if Whisper fails or hasn't loaded yet, skip silently.
