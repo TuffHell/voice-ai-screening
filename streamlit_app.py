@@ -30,7 +30,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
     menu_items={
-        "About": "Voice AI v2 — Clinical speech disorder screening (Wav2Vec2 + Praat).",
+        "About": "Voice AI — Clinical speech screening tool.",
     },
 )
 
@@ -218,6 +218,14 @@ if "last_result" not in st.session_state:
 def load_model():
     from voice_ai_v2.model import VoiceModelV2
     return VoiceModelV2(model_dir="./model_v2")
+
+
+@st.cache_resource(show_spinner="Loading speech recognition (one-time, ~150 MB)...")
+def preload_whisper():
+    """Download/load Whisper-tiny at app startup so first analysis is fast.
+    Returns True if available, False if it failed (analysis still works without it)."""
+    from voice_ai.features import _load_whisper
+    return _load_whisper() is not None
 
 # ─── Analysis function ────────────────────────────────────────────────────────
 def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
@@ -731,7 +739,7 @@ def render_sidebar():
             if "class_weights" in meta:
                 st.caption("Retrained model (class-balanced)")
             else:
-                st.info("Wav2Vec2 backbone + balanced training")
+                st.info("Model loaded — class-balanced training")
         except Exception as e:
             st.error(f"Model error: {e}")
 
@@ -978,6 +986,10 @@ def render_demonstrations():
 # ─── Main application ─────────────────────────────────────────────────────────
 
 def main():
+    # Preload the heavy models at startup so the first analysis is fast
+    # (instead of blocking for the Whisper download on first inference).
+    load_model()
+    preload_whisper()
     render_sidebar()
 
     # Header
@@ -989,7 +1001,7 @@ def main():
           Voice AI — Clinical Speech Screening
         </h1>
         <p style="margin:0.3rem 0 0 0; color:#cbd5e1; font-size:0.92rem;">
-          Wav2Vec2 + Praat acoustic analysis for dysarthria, aphasia and control classification
+          Acoustic analysis for early identification of dysarthria, aphasia, and healthy speech
         </p>
       </div>
     </div>

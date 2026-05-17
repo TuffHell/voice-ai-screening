@@ -10,6 +10,10 @@ UASpeech_low/
 LibriTTS_dev/
 Kaggle_dysctl/
 
+# Node deps for docx generation
+.npm_local/
+node_modules/
+
 # Kaggle credentials (never commit)
 .kaggle/
 kaggle.json

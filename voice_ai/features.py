@@ -159,33 +159,55 @@ def _pause_stats(audio: np.ndarray, sr: int) -> dict:
             'n_pause_1s': n_pause_1s, 'articulation_rate': float(art_rate)}
 
 
-# Cached Whisper model (lazy loaded; only once per session)
+# Cached Whisper model (lazy loaded; only once per session). Set to a marker
+# value `"FAILED"` if the first download/load attempt fails so we never retry.
 _whisper_pipe = None
 
 
-def whisper_word_count(audio: np.ndarray, sr: int = SAMPLE_RATE) -> dict:
+def _load_whisper():
+    """Load Whisper-tiny once. Returns None on failure (cached)."""
+    global _whisper_pipe
+    if _whisper_pipe == "FAILED":
+        return None
+    if _whisper_pipe is not None:
+        return _whisper_pipe
+    try:
+        from transformers import pipeline
+        _whisper_pipe = pipeline(
+            "automatic-speech-recognition",
+            model="openai/whisper-tiny.en",
+            chunk_length_s=30,
+            return_timestamps=False,
+        )
+        return _whisper_pipe
+    except Exception:
+        _whisper_pipe = "FAILED"
+        return None
+
+
+def whisper_word_count(audio: np.ndarray, sr: int = SAMPLE_RATE,
+                       max_seconds: float = 30.0) -> dict:
     """
     Use Whisper-tiny to transcribe and return word-per-minute (WPM).
     Heavily diagnostic for non-fluent aphasia (WPM < 90) and severe dysarthria.
 
-    Returns {'words': int, 'wpm': float, 'duration_sec': float, 'transcript': str}
-    or {'wpm': 0.0, ...} on failure.
+    If Whisper is unavailable (failed download, OOM, etc.), returns wpm=0.0
+    without blocking the analysis.
     """
-    global _whisper_pipe
     duration = len(audio) / sr
     out = {'words': 0, 'wpm': 0.0, 'duration_sec': duration, 'transcript': ''}
     if duration < 1.0:
         return out
+    # Truncate very long clips to keep inference snappy (Whisper-tiny is CPU-
+    # only on free Cloud and can stall on multi-minute audio).
+    if duration > max_seconds:
+        audio = audio[:int(max_seconds * sr)]
+        duration = max_seconds
+    pipe = _load_whisper()
+    if pipe is None:
+        return out
     try:
-        if _whisper_pipe is None:
-            from transformers import pipeline
-            _whisper_pipe = pipeline(
-                "automatic-speech-recognition",
-                model="openai/whisper-tiny.en",
-                chunk_length_s=30,
-                return_timestamps=False,
-            )
-        result = _whisper_pipe({"array": audio.astype(np.float32), "sampling_rate": sr})
+        result = pipe({"array": audio.astype(np.float32), "sampling_rate": sr})
         txt = (result.get("text") if isinstance(result, dict) else "").strip()
         words = [w for w in txt.split() if any(c.isalpha() for c in w)]
         out['words']      = len(words)
