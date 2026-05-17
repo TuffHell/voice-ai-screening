@@ -399,6 +399,8 @@ def _softmax_np(x):
     return e / e.sum(axis=-1, keepdims=True)
 
 def _apply_calibrators(probs, calibrators):
+    if calibrators is None:
+        return np.clip(probs, 1e-9, 1.0)
     out = np.stack([cal.predict(probs[:, i]) for i, cal in enumerate(calibrators)], axis=1)
     out = np.clip(out, 1e-9, 1.0)
     return out / out.sum(axis=1, keepdims=True)

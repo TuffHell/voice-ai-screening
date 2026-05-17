@@ -81,10 +81,22 @@ class VoiceModelV2:
                                               map_location=self.device))
         self.head.eval()
 
-        with open(self.dir / 'scaler.pkl', 'rb') as f:
-            self.scaler = pickle.load(f)
-        with open(self.dir / 'calibrators.pkl', 'rb') as f:
-            self.calibrators = pickle.load(f)
+        # Pickled scaler/calibrators can fail across sklearn versions; isolate
+        # the failure so the head still works (calibration is optional).
+        try:
+            with open(self.dir / 'scaler.pkl', 'rb') as f:
+                self.scaler = pickle.load(f)
+        except Exception as e:
+            warnings.warn(f"Could not load scaler: {e}. Using identity scaler.")
+            class _NoopScaler:
+                def transform(self, x): return x
+            self.scaler = _NoopScaler()
+        try:
+            with open(self.dir / 'calibrators.pkl', 'rb') as f:
+                self.calibrators = pickle.load(f)
+        except Exception as e:
+            warnings.warn(f"Could not load calibrators: {e}. Predictions will be uncalibrated.")
+            self.calibrators = None
 
         self._session: List[np.ndarray] = []
 
