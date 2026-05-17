@@ -220,12 +220,14 @@ def load_model():
     return VoiceModelV2(model_dir="./model_v2")
 
 
-@st.cache_resource(show_spinner="Loading speech recognition (one-time, ~150 MB)...")
-def preload_whisper():
-    """Download/load Whisper-tiny at app startup so first analysis is fast.
-    Returns True if available, False if it failed (analysis still works without it)."""
-    from voice_ai.features import _load_whisper
-    return _load_whisper() is not None
+@st.cache_resource(show_spinner=False)
+def try_preload_whisper():
+    """Best-effort lazy load of Whisper. Never raises; never blocks app boot."""
+    try:
+        from voice_ai.features import _load_whisper
+        return _load_whisper() is not None
+    except Exception:
+        return False
 
 # ─── Analysis function ────────────────────────────────────────────────────────
 def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
@@ -279,21 +281,32 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
 
     # ── Additional clinical features: pause distribution + CPP + articulation
     t0 = _t.time()
-    from voice_ai.features import _pause_stats, _praat_indicators as _praat
-    pstats = _pause_stats(raw, 16000)
-    cpp_res = _praat(raw, 16000)
-    cpp_db  = cpp_res[3] if len(cpp_res) > 3 and cpp_res[3] is not None else 0.0
-    _step("Pause distribution + CPP (clinical fluency features)", t0,
-          f"voiced={pstats['voiced_frac']:.0%}, "
-          f"long pauses (≥500ms)={pstats['n_pause_500ms']}, "
-          f"(≥1s)={pstats['n_pause_1s']}, "
-          f"articulation rate={pstats['articulation_rate']:.2f} syl/s, "
-          f"CPP={cpp_db:.1f} dB")
+    pstats = {'voiced_frac': 0.5, 'n_pause_500ms': 0, 'n_pause_1s': 0, 'articulation_rate': 0.0}
+    cpp_db = 0.0
+    try:
+        from voice_ai.features import _pause_stats, _praat_indicators as _praat
+        pstats = _pause_stats(raw, 16000)
+        cpp_res = _praat(raw, 16000)
+        cpp_db  = cpp_res[3] if cpp_res and len(cpp_res) > 3 and cpp_res[3] is not None else 0.0
+        _step("Pause distribution + CPP (clinical fluency features)", t0,
+              f"voiced={pstats['voiced_frac']:.0%}, "
+              f"long pauses (≥500ms)={pstats['n_pause_500ms']}, "
+              f"(≥1s)={pstats['n_pause_1s']}, "
+              f"articulation rate={pstats['articulation_rate']:.2f} syl/s, "
+              f"CPP={cpp_db:.1f} dB")
+    except Exception as e:
+        _step("Pause distribution + CPP", t0, f"unavailable ({type(e).__name__})")
 
     # ── Whisper-based words-per-minute (WPM) — non-fluent aphasia <90 WPM ──
+    # Best-effort: if Whisper fails or hasn't loaded yet, skip silently.
     t0 = _t.time()
-    from voice_ai.features import whisper_word_count
-    wpm_res = whisper_word_count(raw, 16000)
+    wpm_res = {'words': 0, 'wpm': 0.0, 'duration_sec': len(raw)/16000, 'transcript': ''}
+    try:
+        if try_preload_whisper():
+            from voice_ai.features import whisper_word_count
+            wpm_res = whisper_word_count(raw, 16000)
+    except Exception:
+        pass
     if wpm_res['wpm'] > 0:
         snippet = wpm_res['transcript'][:80] + ('…' if len(wpm_res['transcript']) > 80 else '')
         _step("Whisper ASR → WPM (clinical fluency)", t0,
@@ -302,7 +315,7 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
               f"Heard: \"{snippet}\"")
     else:
         _step("Whisper ASR → WPM", t0,
-              "transcription unavailable for this clip")
+              "transcription unavailable (model not loaded or clip too short)")
 
     # Test-time augmentation: average embeddings over 3 mild perturbations of
     # the preprocessed audio for stability against mic/room variation.
@@ -365,26 +378,29 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
         # 5. Healthy voice quality (rules out dysarthric phonation)
         aph_score = 0.0
         reasons = []
-        if voiced_frac < 0.60:
-            aph_score += min(0.30, (0.60 - voiced_frac) * 1.0)
+        # Only fire on substantial silence (≥50%, not 40%) — short clips have
+        # natural leading/trailing silence that shouldn't trigger aphasia.
+        if voiced_frac < 0.45:
+            aph_score += min(0.25, (0.45 - voiced_frac) * 1.2)
             reasons.append(f"voiced only {voiced_frac:.0%} of audio")
         if n_p1s >= 2:
-            aph_score += min(0.20, 0.05 * n_p1s)
+            aph_score += min(0.20, 0.06 * n_p1s)
             reasons.append(f"{n_p1s} long pauses ≥1s")
-        elif n_p500 >= 3:
+        elif n_p500 >= 4:
             aph_score += 0.10
             reasons.append(f"{n_p500} pauses ≥500ms")
-        if sr_v < 2.5 and sr_v > 0:
-            aph_score += min(0.15, (2.5 - sr_v) * 0.10)
-            reasons.append(f"slow overall rate ({sr_v:.1f} syl/s)")
-        # Articulation rate distinguishes aphasia (~normal articulation,
-        # slow overall) from dysarthria (slow articulation AND slow overall).
-        if art_rate >= 3.0 and sr_v < 2.5:
+        if sr_v < 2.0 and sr_v > 0:
+            aph_score += min(0.15, (2.0 - sr_v) * 0.12)
+            reasons.append(f"very slow overall rate ({sr_v:.1f} syl/s)")
+        # Articulation gap fires only when overall is clearly slow.
+        if art_rate >= 3.5 and sr_v < 2.0 and sr_v > 0:
             aph_score += 0.15
             reasons.append(f"normal articulation rate ({art_rate:.1f}) "
                            f"but slow overall — non-fluent pattern")
-        if hnr_v >= 12 and indicators.jitter_pct < 3.0:
-            aph_score += 0.08
+        # Healthy-phonation cue ONLY counts when there is already prosodic
+        # evidence — never as a standalone trigger.
+        if aph_score > 0 and hnr_v >= 14 and indicators.jitter_pct < 2.5:
+            aph_score += 0.05
             reasons.append(f"healthy phonation (HNR {hnr_v:.0f} dB, "
                            f"jitter {indicators.jitter_pct:.1f}%) rules out dysarthria")
         # Whisper WPM cue (strongest single feature for non-fluent aphasia)
@@ -986,10 +1002,13 @@ def render_demonstrations():
 # ─── Main application ─────────────────────────────────────────────────────────
 
 def main():
-    # Preload the heavy models at startup so the first analysis is fast
-    # (instead of blocking for the Whisper download on first inference).
-    load_model()
-    preload_whisper()
+    # Preload HuBERT — needed for every analysis. Whisper is loaded lazily
+    # on first analysis (best-effort; the prosody rule has WPM-free fallbacks).
+    try:
+        load_model()
+    except Exception as exc:
+        st.error(f"Model failed to load: {exc}")
+        st.stop()
     render_sidebar()
 
     # Header
