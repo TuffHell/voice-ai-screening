@@ -42,8 +42,9 @@ class SpeechEmbedder:
                                   'mps'  if torch.backends.mps.is_available() else
                                   'cpu')
 
-        from transformers import AutoProcessor, AutoModel
-        self.processor = AutoProcessor.from_pretrained(backbone)
+        # AutoFeatureExtractor works for both Wav2Vec2 and HuBERT (no tokenizer).
+        from transformers import AutoFeatureExtractor, AutoModel
+        self.processor = AutoFeatureExtractor.from_pretrained(backbone)
         self.model     = AutoModel.from_pretrained(backbone).to(self.device).eval()
 
         # Freeze all backbone params

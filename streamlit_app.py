@@ -282,6 +282,20 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
           f"articulation rate={pstats['articulation_rate']:.2f} syl/s, "
           f"CPP={cpp_db:.1f} dB")
 
+    # ── Whisper-based words-per-minute (WPM) — non-fluent aphasia <90 WPM ──
+    t0 = _t.time()
+    from voice_ai.features import whisper_word_count
+    wpm_res = whisper_word_count(raw, 16000)
+    if wpm_res['wpm'] > 0:
+        snippet = wpm_res['transcript'][:80] + ('…' if len(wpm_res['transcript']) > 80 else '')
+        _step("Whisper ASR → WPM (clinical fluency)", t0,
+              f"transcribed {wpm_res['words']} words in {wpm_res['duration_sec']:.1f}s "
+              f"= {wpm_res['wpm']:.0f} WPM (control ≈150-180, non-fluent aphasia <90). "
+              f"Heard: \"{snippet}\"")
+    else:
+        _step("Whisper ASR → WPM", t0,
+              "transcription unavailable for this clip")
+
     # Test-time augmentation: average embeddings over 3 mild perturbations of
     # the preprocessed audio for stability against mic/room variation.
     t0 = _t.time()
@@ -365,6 +379,15 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
             aph_score += 0.08
             reasons.append(f"healthy phonation (HNR {hnr_v:.0f} dB, "
                            f"jitter {indicators.jitter_pct:.1f}%) rules out dysarthria")
+        # Whisper WPM cue (strongest single feature for non-fluent aphasia)
+        wpm = wpm_res.get('wpm', 0.0)
+        if wpm > 0 and wpm < 90:
+            boost = min(0.30, (90 - wpm) / 90 * 0.30)
+            aph_score += boost
+            reasons.append(f"Whisper WPM {wpm:.0f} (non-fluent threshold <90)")
+        elif wpm > 0 and wpm < 120:
+            aph_score += 0.10
+            reasons.append(f"reduced WPM {wpm:.0f} (control typically 150-180)")
         if aph_score > 0.05:
             aph_idx = LABELS.index('aphasia')
             old_aph = float(probs_cal[aph_idx])

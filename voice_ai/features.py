@@ -159,6 +159,43 @@ def _pause_stats(audio: np.ndarray, sr: int) -> dict:
             'n_pause_1s': n_pause_1s, 'articulation_rate': float(art_rate)}
 
 
+# Cached Whisper model (lazy loaded; only once per session)
+_whisper_pipe = None
+
+
+def whisper_word_count(audio: np.ndarray, sr: int = SAMPLE_RATE) -> dict:
+    """
+    Use Whisper-tiny to transcribe and return word-per-minute (WPM).
+    Heavily diagnostic for non-fluent aphasia (WPM < 90) and severe dysarthria.
+
+    Returns {'words': int, 'wpm': float, 'duration_sec': float, 'transcript': str}
+    or {'wpm': 0.0, ...} on failure.
+    """
+    global _whisper_pipe
+    duration = len(audio) / sr
+    out = {'words': 0, 'wpm': 0.0, 'duration_sec': duration, 'transcript': ''}
+    if duration < 1.0:
+        return out
+    try:
+        if _whisper_pipe is None:
+            from transformers import pipeline
+            _whisper_pipe = pipeline(
+                "automatic-speech-recognition",
+                model="openai/whisper-tiny.en",
+                chunk_length_s=30,
+                return_timestamps=False,
+            )
+        result = _whisper_pipe({"array": audio.astype(np.float32), "sampling_rate": sr})
+        txt = (result.get("text") if isinstance(result, dict) else "").strip()
+        words = [w for w in txt.split() if any(c.isalpha() for c in w)]
+        out['words']      = len(words)
+        out['transcript'] = txt
+        out['wpm']        = (len(words) / duration) * 60.0 if duration > 0 else 0.0
+    except Exception:
+        pass
+    return out
+
+
 def _speech_rate(audio: np.ndarray, sr: int) -> float:
     """Estimate syllable rate from energy-envelope peaks (syl/sec)."""
     duration = len(audio) / sr

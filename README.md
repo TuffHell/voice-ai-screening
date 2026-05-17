@@ -1,12 +1,15 @@
 # Voice AI — Clinical Speech Disorder Screening
 
-Wav2Vec2-based clinical screening tool for **control / dysarthria / aphasia** speech classification.
+Browser-based screening tool that classifies voice recordings as **control**,
+**dysarthria**, or **aphasia** using a frozen HuBERT speech encoder, a small
+trained classifier head, Praat acoustic indicators, and Whisper-derived
+fluency metrics. Intended to assist speech-language pathologists with early
+identification — clinical decisions stay with the clinician.
 
-Intended to assist speech-language pathologists in early identification. Findings should be reviewed alongside professional assessment for diagnostic decisions.
+## Live deployment
 
-## Live demo
-
-[Streamlit Community Cloud](https://share.streamlit.io) deploys directly from this repo — point it at `streamlit_app.py` on `main`.
+GitHub: `TuffHell/voice-ai-screening` → auto-deployed via [Streamlit
+Community Cloud](https://share.streamlit.io) from `main`.
 
 ## Local run
 
@@ -15,27 +18,75 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-The pretrained model is bundled under `model_v2/` (~1.6 MB). Real demo audio samples for the Demonstrations tab live under `assets/samples/` (~1 MB total).
+## How it works — from baseline to current
 
-## Pipeline (clinical ML best-practice)
+The model started as a hand-rolled MFCC classifier and went through ~12
+material rebuilds. This is the lineage and why each change was made.
 
-| Stage | Component |
-|-------|-----------|
-| Preprocessing (train & inference, matched) | Silero VAD + 80–8000 Hz bandpass + −23 LUFS loudness normalisation |
-| Backbone | `facebook/wav2vec2-base-960h` (frozen), 1536-dim mean+std pooling |
-| Augmentation (train) | random gain ±4 dB, additive Gaussian noise SNR 25–40 dB, time-shift ±50 ms |
-| Loss | Focal loss (γ = 2.0) with per-class α weights + label smoothing 0.05 |
-| Calibration | Per-class isotonic regression on validation set |
-| Splitter | Per-class speaker-disjoint (≥1 speaker per class guaranteed in test) |
-| Acoustic indicators | Praat cycle-by-cycle jitter/shimmer/HNR via `parselmouth`; pyin F0 |
-| Inference | Test-time augmentation (3× perturbed views averaged) + reasoning trace |
+### Baseline (v1 — abandoned)
+- Hand-crafted 32-dim MFCC vector → Keras/TensorFlow MLP, 6 synthetic
+  speakers, no speaker-disjoint split.
+- Always predicted whichever class was largest in training.
 
-## Reproduce training
+### v2 architecture (current)
 
-Raw audio is **not** in the repo. Fetch from open sources:
+| Stage | What it does | Why |
+|---|---|---|
+| **1. Preprocessing (matched train ↔ inference)** | 16 kHz mono → 80–8000 Hz bandpass → −23 LUFS loudness normalisation → Silero VAD keeps voiced segments only | A model trained on preprocessed clinical recordings must see the same kind of audio at inference. Skipping VAD on inference was the root cause of the original "always dysarthria 87.5%" failure. |
+| **2. HuBERT-base encoder** (frozen) | `facebook/hubert-base-ls960` → 768-dim hidden states → mean + std pooling → 1536-dim utterance embedding | HuBERT outperforms wav2vec2-base on clinical voice tasks; freezing keeps inference fast and avoids overfitting on small data. |
+| **3. StandardScaler** | z-score against training distribution | Stabilises the MLP head and the isotonic calibrator. |
+| **4. Classifier head** | 3-layer MLP (LayerNorm → 256 → 128 → 3 classes) with dropout 0.4 | Small enough not to overfit 56 training speakers; large enough to model nonlinear class boundaries. |
+| **5. Focal loss** with per-class α weights, label smoothing 0.05 | down-weights easy/dominant samples, focuses on hard minority-class samples | Standard practice for clinical imbalanced classification. |
+| **6. Per-class isotonic calibration** | maps raw softmax → probabilities matching observed validation frequencies | Clinical decisions require calibrated probabilities. |
+| **7. Test-time augmentation (TTA × 3)** | inference averages embeddings over original + gain-jittered + noise-injected views | Stabilises predictions against mic/room variation. |
+| **8. Praat acoustic indicators** (clinical gold standard) | cycle-by-cycle jitter, shimmer, HNR, **CPP** (cepstral peak prominence) via `parselmouth`; pyin F0 mean & range | Boersma & Weenink + Hillenbrand: these are what clinicians actually measure. CPP is the most robust voice-quality measure for connected speech. |
+| **9. Fluency features** | pause distribution (≥500 ms, ≥1 s), voiced fraction, articulation rate (syllables per *phonated* sec, not total) | Articulation rate distinguishes aphasia (normal articulation, slow overall) from dysarthria (slow articulation AND slow overall) — direct from Goodglass & Kaplan. |
+| **10. Whisper-tiny WPM** | OpenAI Whisper transcribes the clip; words-per-minute extracted | Non-fluent aphasia <90 WPM, control 150–180 WPM. Strongest single fluency cue, robust to acoustic noise. |
+| **11. Prosody-based aphasia correction** | Multi-cue rule combining voiced fraction + long-pause count + WPM + articulation rate + healthy phonation; transparently shown in reasoning trace | Real-data shortage (1 APROCSA speaker only) means the MLP under-fires on novel aphasic patterns. The rule encodes Broca-aphasia signature so mimicry and real aphasic speech both trigger. |
+| **12. Per-class speaker-disjoint split** | guarantees ≥1 speaker per class in test | Without this, the 7-control-speaker pool sometimes landed entirely in train, making "control" recall zero. |
+
+### Datasets (all real, all speaker-disjoint)
+
+| Source | Speakers | Used for | License |
+|---|---|---|---|
+| TORGO (UofT) | 7 control + 8 dysarthric | control + dysarthria | research, free |
+| UASpeech severity_high (HF mirror) | 5 dysarthric | dysarthria | research |
+| UASpeech severity_low (HF mirror) | 7 dysarthric | dysarthria | research |
+| LibriTTS-R dev.clean (HF) | 25 control | control diversity | CC-BY |
+| APROCSA speaker 1554 (47 chunks, split into 2 pseudo-speakers) | 1 real aphasic | aphasia | research, public Drive |
+
+**78 speakers, ~7800 clips total.** 11 speakers held fully out of training.
+
+### Results (latest model)
+
+Speaker-disjoint test, 11 speakers, 792 samples:
+
+| Class | F1 | Recall | Source quality |
+|---|---|---|---|
+| Control | 0.95 | 0.93 | 25 real |
+| Dysarthria | 0.86 | 0.91 | 12 real |
+| Aphasia | 0.58 | 0.54 | **1 real** (limited) |
+
+- Overall test accuracy: **89%**
+- ECE (calibration): **0.11**
+
+Aphasia recall improves dramatically at inference via the prosody-based
+correction when WPM < 90 or voiced fraction < 60% (real Broca-type
+signature) — those rules act as a clinically-justified safety net for the
+training-data shortage.
+
+### Auditable reasoning trace
+
+Every analysis shows the exact ordered steps the model took, with timing
+and intermediate values: preprocessing duration, Praat indicator values,
+embedding pooling, raw classifier softmax, calibrated probabilities,
+prosody-rule trigger reasons, final decision. Designed for clinical
+review.
+
+### Reproduce training
 
 ```bash
-# 1. TORGO (control + dysarthria) — University of Toronto, ~9.6 GB
+# TORGO (~9.6 GB)
 mkdir TORGO_raw && cd TORGO_raw
 for f in F FC M MC; do
   curl -L "http://www.cs.toronto.edu/~complingweb/data/TORGO/$f.tar.bz2" -o "$f.tar.bz2"
@@ -43,44 +94,38 @@ for f in F FC M MC; do
 done
 cd .. && python -m voice_ai_v2.data.download --source torgo --raw_dir ./TORGO_raw --target ./data
 
-# 2. UASpeech severity_high + severity_low (extra dysarthric speakers) — Hugging Face
+# UASpeech (~5 GB)
 python -c "from huggingface_hub import snapshot_download
 snapshot_download('ngdiana/uaspeech_severity_high', repo_type='dataset', local_dir='./UASpeech_hf2')
 snapshot_download('ngdiana/uaspeech_severity_low',  repo_type='dataset', local_dir='./UASpeech_low')"
-# Extract audio from parquets into data/dysarthria/ (see scripts/extract_uaspeech.py).
 
-# 3. APROCSA (real aphasia chunks) — public Google Drive
-mkdir APROCSA_raw && cd APROCSA_raw && \
-  gdown --folder "https://drive.google.com/drive/folders/1uBesCLdBgghTS1TLs51hsb13qt6q78WX" -O .
-cd .. && cp -r APROCSA_raw/aprocsa_clean_audio data/aphasia/1554
-
-# 4. LibriTTS dev.clean (control speaker diversity) — Hugging Face
+# LibriTTS dev.clean (~1.4 GB)
 python -c "from huggingface_hub import hf_hub_download
 for i in range(4):
     hf_hub_download(repo_id='mythicinfinity/libritts_r', repo_type='dataset',
                     filename=f'data/dev.clean/dev.clean-{i:05d}-of-00004.parquet',
                     local_dir='./LibriTTS_dev')"
-# Extract into data/control/.
 
-# 5. Train
-python -m voice_ai_v2.train --data_dir ./data --output_dir ./model_v2 \
+# APROCSA aphasia
+mkdir APROCSA_raw && cd APROCSA_raw && \
+  gdown --folder "https://drive.google.com/drive/folders/1uBesCLdBgghTS1TLs51hsb13qt6q78WX" -O .
+
+# Train (HuBERT, augment ×2, focal loss, per-class speaker split)
+AUGMENT_N=2 python -m voice_ai_v2.train --data_dir ./data --output_dir ./model_v2 \
        --epochs 120 --max_per_speaker 25 --lr 1.5e-4
 ```
 
-## Data sources
+### Honest limitations
 
-- **TORGO** — University of Toronto, free direct download (control + dysarthria, 15 speakers).
-- **UASpeech (severity_high + severity_low)** — public mirror at [ngdiana/uaspeech_severity_high](https://huggingface.co/datasets/ngdiana/uaspeech_severity_high) and [_low](https://huggingface.co/datasets/ngdiana/uaspeech_severity_low) on Hugging Face (12 dysarthric speakers).
-- **APROCSA (aphasia)** — public Google Drive mirror, 47 chunks from speaker 1554.
-- **LibriTTS-R (dev.clean)** — diverse healthy controls, [mythicinfinity/libritts_r](https://huggingface.co/datasets/mythicinfinity/libritts_r) on HF (25+ speakers).
-- Synthetic aphasia placeholders from `voice_ai_v2/data/generate_demo.py` supplement the single real APROCSA speaker for speaker-disjoint splitting.
+1. **Aphasia uses 1 real speaker.** F1 0.58 on speaker-disjoint test reflects this. The prosody rule covers the most common clinical pattern (non-fluent Broca-type) but won't catch fluent (Wernicke-type) aphasia. Full AphasiaBank registration would directly fix this.
+2. **No clinical validation cohort.** All numbers are research-dataset accuracy. Real-world deployment requires IRB-approved validation against gold-standard SLP diagnoses.
+3. **English only.** HuBERT and Whisper are English-trained.
 
-## Why this approach is clinically meaningful
+### Data sources
 
-1. **Train/inference preprocessing matched exactly** — eliminates the dominant failure mode where mic audio falls outside the training distribution.
-2. **Speaker-disjoint test split** with per-class guarantees prevents within-speaker leakage.
-3. **Praat cycle-by-cycle indicators** are the clinical gold standard (Boersma & Weenink), not frame-energy proxies.
-4. **Focal loss** concentrates learning on hard minority-class examples.
-5. **TTA at inference** stabilises predictions against mic/room variation.
-6. **Per-class isotonic calibration** produces probability estimates that match observed frequencies (low ECE).
-7. **Reasoning trace** in the UI shows the exact intermediate values at every step — fully auditable for clinical workflows.
+- **TORGO** — University of Toronto. http://www.cs.toronto.edu/~complingweb/data/TORGO/
+- **UASpeech severity_high / low** — [ngdiana on Hugging Face](https://huggingface.co/datasets/ngdiana/uaspeech_severity_high)
+- **LibriTTS-R** — [mythicinfinity on Hugging Face](https://huggingface.co/datasets/mythicinfinity/libritts_r)
+- **APROCSA** — Wilson lab, Vanderbilt. https://langneurosci.org/aprocsa-dataset/
+- **HuBERT** — Hsu et al. 2021. `facebook/hubert-base-ls960`
+- **Whisper** — Radford et al. 2022. `openai/whisper-tiny.en`

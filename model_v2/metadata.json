@@ -1,5 +1,5 @@
 {
-  "backbone": "facebook/wav2vec2-base-960h",
+  "backbone": "facebook/hubert-base-ls960",
   "embedding_dim": 1536,
   "pooling": "mean_std",
   "class_labels": [
@@ -22,8 +22,8 @@
   },
   "speaker_disjoint_splits": true,
   "isotonic_calibration": true,
-  "test_accuracy": 0.8901515151515151,
-  "test_ece": 0.10960873517424166,
+  "test_accuracy": 0.9621212121212122,
+  "test_ece": 0.08890387310524178,
   "improvements_over_v1": [
     "Wav2Vec2 embeddings (768-dim contextual) replace 32 MFCC features",
     "Speaker-disjoint train/test split \u2014 no within-speaker leakage",
