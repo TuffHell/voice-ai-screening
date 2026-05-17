@@ -360,6 +360,33 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
     _step("Deep speech embedding (fast single pass)", t0,
           f"{emb_main.shape[0]}-dim mean+std embedding (analysed first {len(proc_emb)/16000:.1f}s)")
 
+    # Multi-window voting: for clips ≥ 8 s, classify three overlapping windows
+    # independently and use AGREEMENT as a confidence signal. Disagreement
+    # honestly reports uncertainty rather than fake confidence.
+    from voice_ai_v2.train import _softmax_np as _sm_pre
+    window_probs = []
+    window_winners = []
+    if len(proc) >= 16000 * 8:
+        L = len(proc); w = int(16000 * 5)
+        windows = [proc[:w],
+                   proc[max(0, (L - w) // 2): max(0, (L - w) // 2) + w],
+                   proc[max(0, L - w):]]
+        t0 = _t.time()
+        for w_ in windows:
+            wemb = model.embedder.embed(w_, sr=16000)
+            wes  = model.scaler.transform(wemb.reshape(1, -1))
+            with _torch.no_grad():
+                wl = model.head(_torch.tensor(wes, dtype=_torch.float32,
+                                              device=model.device)).cpu().numpy()
+            wp = _sm_pre(wl)[0]
+            window_probs.append(wp)
+            window_winners.append(int(wp.argmax()))
+        win_summary = ", ".join(
+            f"w{i+1}:{LABELS[w][:3]}({wp.max():.0%})"
+            for i, (wp, w) in enumerate(zip(window_probs, window_winners))
+        )
+        _step("Multi-window voting (3 × 5s windows, independent classification)", t0, win_summary)
+
     # Baseline forward pass to check confidence
     t0 = _t.time()
     emb_s_main = model.scaler.transform(emb_main.reshape(1, -1))
@@ -397,12 +424,75 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
     raw_probs = _softmax_np(logits)
     short = [l[:3] for l in LABELS]
     _step("Classifier head forward pass (MLP)", t0,
-          f"logits → softmax: {dict(zip(short, [f'{p:.2f}' for p in raw_probs[0]]))}")
+          f"softmax: {dict(zip(short, [f'{p:.2f}' for p in raw_probs[0]]))}")
 
     t0 = _t.time()
     probs_cal = _apply_calibrators(raw_probs, model.calibrators)[0]
     _step("Isotonic calibration (per-class)", t0,
           f"calibrated probs: {dict(zip(short, [f'{p:.2f}' for p in probs_cal]))}")
+
+    # Multi-window agreement fusion: if all windows agree with the full-clip
+    # prediction, sharpen confidence; if they disagree, blend in their votes
+    # so confidence honestly reflects uncertainty.
+    if window_probs:
+        full_winner = int(probs_cal.argmax())
+        n_agree = sum(1 for w in window_winners if w == full_winner)
+        # Average the per-window probabilities with the full-clip probability
+        all_probs = np.stack([probs_cal] + window_probs, axis=0)
+        consensus = np.mean(all_probs, axis=0)
+        if n_agree == len(window_winners):
+            # Full consensus: amplify the winning class
+            consensus = consensus.copy()
+            consensus[full_winner] = min(0.95, consensus[full_winner] + 0.15)
+            consensus = consensus / consensus.sum()
+            note = f"all 3 windows agree with full-clip → boosted confidence"
+        elif n_agree >= 2:
+            note = f"{n_agree}/3 windows agree — moderate confidence"
+        else:
+            note = f"windows disagree — honest low-confidence prediction"
+        probs_cal = consensus
+        _step("Window-agreement fusion", 0,
+              f"{note}; final probs: {dict(zip(short, [f'{p:.2f}' for p in probs_cal]))}")
+
+    # ── Healthy-speech veto (counter to the aphasia prosody rule) ─────────
+    # If 3+ markers of healthy speech are present, the aphasia rule cannot
+    # fire — this is symmetric to the aphasia signature: clear positive
+    # evidence of normal speech blocks the boost.
+    t0 = _t.time()
+    healthy_signs = 0
+    healthy_reasons = []
+    if indicators.hnr_db >= 15:
+        healthy_signs += 1; healthy_reasons.append(f"HNR {indicators.hnr_db:.1f} dB ≥15")
+    if 0 < indicators.jitter_pct < 1.5:
+        healthy_signs += 1; healthy_reasons.append(f"jitter {indicators.jitter_pct:.1f}% <1.5")
+    if pstats['voiced_frac'] >= 0.70:
+        healthy_signs += 1; healthy_reasons.append(f"voiced {pstats['voiced_frac']:.0%} ≥70")
+    if indicators.speech_rate_est >= 4.0:
+        healthy_signs += 1; healthy_reasons.append(f"rate {indicators.speech_rate_est:.1f} syl/s ≥4")
+    if wpm_res.get('wpm', 0) >= 130:
+        healthy_signs += 1; healthy_reasons.append(f"WPM {wpm_res['wpm']:.0f} ≥130")
+    if pstats['n_pause_1s'] == 0 and pstats['n_pause_500ms'] <= 1:
+        healthy_signs += 1; healthy_reasons.append("no long pauses")
+    healthy_veto = healthy_signs >= 3
+    if healthy_veto:
+        # Also boost control proportionally, since the speech is clearly normal
+        ctl_idx = LABELS.index('control')
+        old_ctl = float(probs_cal[ctl_idx])
+        target = min(0.90, old_ctl + 0.20 + 0.05 * healthy_signs)
+        delta = target - old_ctl
+        if delta > 0:
+            others = [i for i in range(len(LABELS)) if i != ctl_idx]
+            other_sum = sum(probs_cal[i] for i in others) + 1e-9
+            for i in others:
+                probs_cal[i] = max(0.0, probs_cal[i] - delta * (probs_cal[i] / other_sum))
+            probs_cal[ctl_idx] = target
+            probs_cal = probs_cal / probs_cal.sum()
+        _step("Healthy-speech veto applied", t0,
+              f"{healthy_signs} healthy markers → control boosted to {probs_cal[ctl_idx]:.0%}, "
+              f"aphasia rule blocked: {'; '.join(healthy_reasons)}")
+    else:
+        _step("Healthy-speech check", t0,
+              f"{healthy_signs} healthy markers (need 3+ to block aphasia rule)")
 
     # ── Prosody-based aphasia correction ──────────────────────────────
     # Clinical justification: non-fluent (Broca-type) aphasia is characterised
@@ -414,7 +504,7 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
     # prior, transparently shown in the trace below.
     t0 = _t.time()
     raw_sec = len(raw) / 16000
-    if 'aphasia' in LABELS and raw_sec >= 6.0:
+    if 'aphasia' in LABELS and raw_sec >= 6.0 and not healthy_veto:
         voiced_frac = pstats['voiced_frac']
         sr_v        = indicators.speech_rate_est
         hnr_v       = indicators.hnr_db
@@ -515,6 +605,9 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
             _step("Prosody-based aphasia correction", t0,
                   f"no aphasic prosodic signature (voiced={voiced_frac:.0%}, "
                   f"rate={sr_v:.1f} syl/s, WPM={wpm_str})")
+    elif 'aphasia' in LABELS and healthy_veto:
+        _step("Prosody-based aphasia correction", t0,
+              "skipped — healthy-speech veto active (clear evidence of normal speech)")
     elif 'aphasia' in LABELS:
         _step("Prosody-based aphasia correction", t0,
               f"skipped — clip is only {raw_sec:.1f}s; needs ≥6s for reliable prosody. "
