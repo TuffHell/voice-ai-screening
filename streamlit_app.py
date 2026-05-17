@@ -432,158 +432,35 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
           f"calibrated probs: {dict(zip(short, [f'{p:.2f}' for p in probs_cal]))}")
 
     # Multi-window agreement fusion: if all windows agree with the full-clip
-    # prediction, sharpen confidence; if they disagree, blend in their votes
-    # so confidence honestly reflects uncertainty.
+    # Multi-window probability AVERAGING (no boost, no rule overrides).
+    # When the clip is long enough that we ran 3 windows, average them with
+    # the full-clip probabilities. This is a pure ensemble — no class-specific
+    # amplification that can lock in a wrong winner.
     if window_probs:
+        all_probs = np.stack([probs_cal] + window_probs, axis=0)
+        probs_cal = np.mean(all_probs, axis=0)
+        probs_cal = probs_cal / probs_cal.sum()
         full_winner = int(probs_cal.argmax())
         n_agree = sum(1 for w in window_winners if w == full_winner)
-        # Average the per-window probabilities with the full-clip probability
-        all_probs = np.stack([probs_cal] + window_probs, axis=0)
-        consensus = np.mean(all_probs, axis=0)
-        if n_agree == len(window_winners):
-            # Full consensus: amplify the winning class
-            consensus = consensus.copy()
-            consensus[full_winner] = min(0.95, consensus[full_winner] + 0.15)
-            consensus = consensus / consensus.sum()
-            note = f"all 3 windows agree with full-clip → boosted confidence"
-        elif n_agree >= 2:
-            note = f"{n_agree}/3 windows agree — moderate confidence"
-        else:
-            note = f"windows disagree — honest low-confidence prediction"
-        probs_cal = consensus
-        _step("Window-agreement fusion", 0,
-              f"{note}; final probs: {dict(zip(short, [f'{p:.2f}' for p in probs_cal]))}")
+        _step("Multi-window probability averaging", 0,
+              f"{n_agree}/3 windows agree with averaged winner; "
+              f"final probs: {dict(zip(short, [f'{p:.2f}' for p in probs_cal]))}")
 
-    # ── Clinical marker counts (three rules consume these) ───────────────
-    # Three independent acoustic signatures, each with stricter thresholds:
-    #
-    # HEALTHY voice (control):  HNR≥15, jitter<1.5%, voiced≥70%, rate≥4.0,
-    #                           WPM≥130, no long pauses (0 of ≥1s)
-    # VOICE PATHOLOGY (dysarthria): jitter≥2.5%, shimmer≥10%, HNR<13,
-    #                               CPP<5, rate<3.0
-    # NON-FLUENT (aphasia):     long pauses ≥1s (≥2), voiced<60%, WPM<110,
-    #                           slow rate <3.0, healthy phonation rules out
-    #                           dysarthric voice
+    # Descriptive acoustic indicator summary — shown for clinician review.
+    # NO LONGER USED FOR PROBABILITY OVERRIDES. The MLP head was trained on
+    # speaker-disjoint real data (89% test acc); we trust its calibrated
+    # output rather than layering brittle rule-based corrections on top.
     t0 = _t.time()
-
-    healthy_signs = 0; healthy_reasons = []
-    if indicators.hnr_db >= 15:
-        healthy_signs += 1; healthy_reasons.append(f"HNR {indicators.hnr_db:.1f}≥15")
-    if 0 < indicators.jitter_pct < 1.5:
-        healthy_signs += 1; healthy_reasons.append(f"jitter {indicators.jitter_pct:.1f}%<1.5")
-    if pstats['voiced_frac'] >= 0.70:
-        healthy_signs += 1; healthy_reasons.append(f"voiced {pstats['voiced_frac']:.0%}≥70")
-    if indicators.speech_rate_est >= 4.0:
-        healthy_signs += 1; healthy_reasons.append(f"rate {indicators.speech_rate_est:.1f}≥4.0")
-    if wpm_res.get('wpm', 0) >= 130:
-        healthy_signs += 1; healthy_reasons.append(f"WPM {wpm_res['wpm']:.0f}≥130")
-    if pstats['n_pause_1s'] == 0:
-        healthy_signs += 1; healthy_reasons.append("no long pauses ≥1s")
-
-    pathology_signs = 0; pathology_reasons = []
-    if indicators.jitter_pct >= 2.5:
-        pathology_signs += 1; pathology_reasons.append(f"jitter {indicators.jitter_pct:.1f}%≥2.5")
-    if indicators.shimmer_pct >= 10.0:
-        pathology_signs += 1; pathology_reasons.append(f"shimmer {indicators.shimmer_pct:.1f}%≥10")
-    if 0 < indicators.hnr_db < 13:
-        pathology_signs += 1; pathology_reasons.append(f"HNR {indicators.hnr_db:.1f}<13")
-    if 0 < indicators.speech_rate_est < 3.0:
-        pathology_signs += 1; pathology_reasons.append(f"rate {indicators.speech_rate_est:.1f}<3.0")
-
-    aphasia_signs = 0; aphasia_reasons = []
     wpm = wpm_res.get('wpm', 0.0)
-    if pstats['n_pause_1s'] >= 2:
-        aphasia_signs += 1; aphasia_reasons.append(f"{pstats['n_pause_1s']} long pauses ≥1s")
-    if pstats['voiced_frac'] < 0.60:
-        aphasia_signs += 1; aphasia_reasons.append(f"voiced {pstats['voiced_frac']:.0%}<60")
-    if 0 < wpm < 110:
-        aphasia_signs += 1; aphasia_reasons.append(f"WPM {wpm:.0f}<110")
-    # The hallmark distinguishing aphasia from dysarthria: phonation is intact
-    aphasia_rule_out_dys = (indicators.hnr_db >= 12 and 0 < indicators.jitter_pct < 2.5)
-    if aphasia_rule_out_dys:
-        aphasia_signs += 1; aphasia_reasons.append(
-            f"healthy phonation (HNR {indicators.hnr_db:.0f}, jitter {indicators.jitter_pct:.1f}%)"
-        )
-
-    _step("Clinical marker counts (3 rules)", t0,
-          f"healthy:{healthy_signs}/6 · pathology:{pathology_signs}/4 · aphasia:{aphasia_signs}/4")
-
-    # ── Rule selection: pick the rule with strongest, most-distinct evidence
-    # so only ONE rule fires per analysis. Aphasia requires its own phonation
-    # signature (high HNR + low jitter) to outvote dysarthria when both have
-    # prosodic cues.
-    t0 = _t.time()
-    fired = None
-
-    # Dysarthria rule: 2+ voice-pathology markers, and aphasia rule-out (high
-    # HNR + low jitter) is NOT met. This catches slurred jittery speech that
-    # would otherwise be assigned to control by mistake.
-    if pathology_signs >= 2 and not aphasia_rule_out_dys and 'dysarthria' in LABELS:
-        dys_idx = LABELS.index('dysarthria')
-        old = float(probs_cal[dys_idx])
-        target = min(0.90, max(old, 0.55 + 0.10 * pathology_signs))
-        delta = target - old
-        if delta > 0:
-            others = [i for i in range(len(LABELS)) if i != dys_idx]
-            other_sum = sum(probs_cal[i] for i in others) + 1e-9
-            for i in others:
-                probs_cal[i] = max(0.0, probs_cal[i] - delta * (probs_cal[i] / other_sum))
-            probs_cal[dys_idx] = target
-            probs_cal = probs_cal / probs_cal.sum()
-        fired = "dysarthria"
-        _step("Clinical dysarthria rule fired", t0,
-              f"{pathology_signs}/4 voice-pathology markers ({'; '.join(pathology_reasons)}) "
-              f"→ dysarthria {old:.2f} → {probs_cal[dys_idx]:.2f}")
-
-    # Aphasia rule: 3+ aphasia markers (multiple alternative paths possible
-    # — the "all 4 AND" gate was too strict). Requires the rule-out cue or
-    # a very strong WPM signal.
-    elif aphasia_signs >= 3 and 'aphasia' in LABELS and len(raw)/16000 >= 8:
-        aph_idx = LABELS.index('aphasia')
-        old = float(probs_cal[aph_idx])
-        # Stronger boost if WPM is very low or all 4 signs fire
-        if aphasia_signs == 4 or (0 < wpm < 80):
-            target = min(0.90, max(old, 0.78))
-        else:
-            target = min(0.85, max(old, 0.62))
-        delta = target - old
-        if delta > 0:
-            others = [i for i in range(len(LABELS)) if i != aph_idx]
-            other_sum = sum(probs_cal[i] for i in others) + 1e-9
-            for i in others:
-                probs_cal[i] = max(0.0, probs_cal[i] - delta * (probs_cal[i] / other_sum))
-            probs_cal[aph_idx] = target
-            probs_cal = probs_cal / probs_cal.sum()
-        fired = "aphasia"
-        _step("Clinical aphasia rule fired", t0,
-              f"{aphasia_signs}/4 BDAE non-fluent markers ({'; '.join(aphasia_reasons)}) "
-              f"→ aphasia {old:.2f} → {probs_cal[aph_idx]:.2f}")
-
-    # Control rule: 4+ healthy markers AND no voice-pathology AND no aphasic
-    # signs. Stricter co-occurrence prevents firing on borderline pathological
-    # speech that just happens to have a few healthy markers.
-    elif (healthy_signs >= 4 and pathology_signs <= 1
-          and aphasia_signs <= 1 and 'control' in LABELS):
-        ctl_idx = LABELS.index('control')
-        old = float(probs_cal[ctl_idx])
-        target = min(0.90, max(old, 0.50 + 0.08 * healthy_signs))
-        delta = target - old
-        if delta > 0:
-            others = [i for i in range(len(LABELS)) if i != ctl_idx]
-            other_sum = sum(probs_cal[i] for i in others) + 1e-9
-            for i in others:
-                probs_cal[i] = max(0.0, probs_cal[i] - delta * (probs_cal[i] / other_sum))
-            probs_cal[ctl_idx] = target
-            probs_cal = probs_cal / probs_cal.sum()
-        fired = "control"
-        _step("Clinical control rule fired", t0,
-              f"{healthy_signs}/6 healthy markers, no pathology/aphasia signature "
-              f"→ control {old:.2f} → {probs_cal[ctl_idx]:.2f}")
-
-    if fired is None:
-        _step("Clinical rules check", t0,
-              "no rule fired — trusting MLP head probabilities "
-              f"(healthy:{healthy_signs} pathology:{pathology_signs} aphasia:{aphasia_signs})")
+    wpm_str = f"{wpm:.0f}" if wpm > 0 else "n/a"
+    summary = (
+        f"HNR={indicators.hnr_db:.1f} dB  jitter={indicators.jitter_pct:.2f}%  "
+        f"shimmer={indicators.shimmer_pct:.2f}%  voiced={pstats['voiced_frac']:.0%}  "
+        f"rate={indicators.speech_rate_est:.1f} syl/s  "
+        f"WPM={wpm_str}  "
+        f"long pauses ≥1s: {pstats['n_pause_1s']}"
+    )
+    _step("Clinical indicators summary (descriptive only)", t0, summary)
 
     from voice_ai_v2.model import _make_prediction
     prediction = _make_prediction(probs_cal)
