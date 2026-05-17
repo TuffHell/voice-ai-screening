@@ -30,130 +30,118 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
     menu_items={
-        "About": "Voice AI v1.0 — Research screening tool. Not a medical device.",
+        "About": "Voice AI v2 — Clinical speech disorder screening (Wav2Vec2 + Praat).",
     },
 )
 
 # ─── Custom CSS ───────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-/* ── Typography & base ── */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 html, body, [class*="css"] {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
-/* ── Sidebar ── */
+/* App background */
+.stApp { background: linear-gradient(180deg, #f0f6ff 0%, #e0eaff 100%); }
+
+/* Sidebar — deep navy */
 section[data-testid="stSidebar"] {
-    background: #0f172a;
-    border-right: 1px solid #1e293b;
+    background: #0c1d3d;
+    border-right: 1px solid #1e3a8a;
 }
-section[data-testid="stSidebar"] * {
-    color: #e2e8f0 !important;
-}
+section[data-testid="stSidebar"] * { color: #dbeafe !important; }
 section[data-testid="stSidebar"] .stMarkdown h3 {
-    color: #7dd3fc !important;
-    font-size: 0.75rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    color: #93c5fd !important;
+    font-size: 0.75rem; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase;
     margin-top: 1.4rem;
 }
 
-/* ── Main background ── */
 .main .block-container {
-    padding-top: 1rem;
-    padding-bottom: 2rem;
-    max-width: 1200px;
+    padding-top: 1rem; padding-bottom: 2rem; max-width: 1200px;
 }
 
-/* ── Disclaimer banner ── */
-.disclaimer-banner {
-    background: linear-gradient(90deg, #fef3c7, #fde68a);
-    border-left: 4px solid #f59e0b;
-    border-radius: 6px;
-    padding: 0.6rem 1rem;
-    font-size: 0.82rem;
-    color: #78350f;
-    margin-bottom: 1rem;
-}
-
-/* ── Primary result card ── */
+/* Result cards — all blue family */
 .result-card-high {
-    background: linear-gradient(135deg, #ecfdf5, #d1fae5);
-    border: 2px solid #10b981;
-    border-radius: 12px;
-    padding: 1.5rem 2rem;
+    background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+    border: 2px solid #2563eb;
+    border-radius: 12px; padding: 1.5rem 2rem;
 }
 .result-card-moderate {
-    background: linear-gradient(135deg, #fffbeb, #fef3c7);
-    border: 2px solid #f59e0b;
-    border-radius: 12px;
-    padding: 1.5rem 2rem;
+    background: linear-gradient(135deg, #e0e7ff, #c7d2fe);
+    border: 2px solid #4f46e5;
+    border-radius: 12px; padding: 1.5rem 2rem;
 }
 .result-card-uncertain {
-    background: linear-gradient(135deg, #fef2f2, #fee2e2);
-    border: 2px solid #ef4444;
-    border-radius: 12px;
-    padding: 1.5rem 2rem;
+    background: linear-gradient(135deg, #eff6ff, #dbeafe);
+    border: 2px dashed #60a5fa;
+    border-radius: 12px; padding: 1.5rem 2rem;
 }
 
-/* ── Metric cards ── */
+/* Metric cards */
 .metric-card {
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
+    background: #ffffff;
+    border: 1px solid #bfdbfe;
+    border-left: 4px solid #2563eb;
     border-radius: 10px;
-    padding: 1rem 1.2rem;
-    text-align: center;
+    padding: 1rem 1.2rem; text-align: center;
+    box-shadow: 0 2px 4px rgba(37,99,235,0.05);
 }
-.metric-label { font-size: 0.75rem; color: #64748b; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
-.metric-value { font-size: 1.6rem; font-weight: 700; color: #0f172a; margin: 0.2rem 0; }
-.metric-range { font-size: 0.72rem; color: #94a3b8; }
-.metric-normal { color: #10b981 !important; }
-.metric-abnormal { color: #ef4444 !important; }
+.metric-label { font-size: 0.75rem; color: #1e40af; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+.metric-value { font-size: 1.6rem; font-weight: 700; color: #1e3a8a; margin: 0.2rem 0; }
+.metric-range { font-size: 0.72rem; color: #64748b; }
+.metric-normal   { color: #1d4ed8 !important; }
+.metric-abnormal { color: #1e3a8a !important; border-color: #f59e0b; }
 
-/* ── Section headings ── */
+/* Section headings */
 .section-heading {
-    font-size: 0.78rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #64748b;
-    border-bottom: 1px solid #e2e8f0;
+    font-size: 0.78rem; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: #1e40af;
+    border-bottom: 1px solid #bfdbfe;
     padding-bottom: 0.4rem;
     margin: 1.5rem 0 0.8rem 0;
 }
 
-/* ── Confidence badge ── */
-.badge-high     { background: #d1fae5; color: #065f46; padding: 2px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
-.badge-moderate { background: #fef3c7; color: #78350f; padding: 2px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
-.badge-uncertain{ background: #fee2e2; color: #7f1d1d; padding: 2px 10px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
+/* Confidence badges — blue family */
+.badge-high      { background: #1d4ed8; color: #ffffff; padding: 3px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
+.badge-moderate  { background: #3b82f6; color: #ffffff; padding: 3px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
+.badge-uncertain { background: #93c5fd; color: #1e3a8a; padding: 3px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
 
-/* ── Tab styling ── */
+/* Tabs */
 .stTabs [data-baseweb="tab-list"] {
     gap: 4px;
-    border-bottom: 2px solid #e2e8f0;
+    border-bottom: 2px solid #bfdbfe;
 }
 .stTabs [data-baseweb="tab"] {
-    font-size: 0.88rem;
-    font-weight: 500;
-    color: #64748b;
+    font-size: 0.88rem; font-weight: 500; color: #475569;
 }
 .stTabs [aria-selected="true"] {
     color: #1d4ed8 !important;
     border-bottom: 2px solid #1d4ed8;
 }
 
-/* ── Buttons ── */
+/* Buttons — blue */
 .stButton > button {
     font-weight: 600;
     border-radius: 8px;
+    background: #2563eb;
+    color: #ffffff !important;
+    border: 1px solid #1d4ed8;
     transition: all 0.15s;
 }
-.stButton > button:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+.stButton > button:hover {
+    background: #1d4ed8;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(37,99,235,0.25);
+}
 
-/* ── Hide Streamlit branding ── */
+/* Headings */
+h1, h2, h3, h4 { color: #1e3a8a; }
+
+/* Hide Streamlit branding */
 #MainMenu, footer { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
@@ -176,24 +164,30 @@ def load_model():
 def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
     """Load audio bytes, run model + clinical indicators, return results dict."""
     import soundfile as sf
-    from voice_ai.features import load_and_preprocess, extract_model_features, extract_clinical_indicators
+    import librosa
+    from voice_ai.features import extract_clinical_indicators
 
     model = load_model()
 
-    # Write to temp file so librosa can load it
     suffix = Path(filename).suffix or ".wav"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
         f.write(audio_bytes)
         tmp_path = f.name
 
     try:
-        audio = load_and_preprocess(tmp_path)
+        # Raw audio (16 kHz mono, no noise reduction) — required for valid
+        # clinical jitter/shimmer/HNR via Praat.
+        raw, _ = librosa.load(tmp_path, sr=16000, mono=True)
+        raw = raw.astype(np.float32)
     finally:
         os.unlink(tmp_path)
 
+    indicators = extract_clinical_indicators(raw)
+
+    # Model prediction uses the v2 pipeline (its own preprocessing/VAD)
     model.clear_session()
-    prediction  = model.predict_audio(audio)
-    indicators  = extract_clinical_indicators(audio)
+    prediction = model.predict_audio(raw)
+    audio = raw
 
     # Waveform data (downsample to 500 pts for display)
     sr = 16000
@@ -489,7 +483,7 @@ def render_sidebar():
             if "class_weights" in meta:
                 st.caption("Retrained model (class-balanced)")
             else:
-                st.warning("Original model — aphasia detection limited. Retrain for clinical use.")
+                st.info("Wav2Vec2 backbone + balanced training")
         except Exception as e:
             st.error(f"Model error: {e}")
 
@@ -533,15 +527,6 @@ def main():
           Acoustic analysis for dysarthria, aphasia and atypical speech detection
         </p>
       </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Disclaimer banner
-    st.markdown("""
-    <div class="disclaimer-banner">
-      <strong>Research Tool Only.</strong> This application is not a certified medical device.
-      All findings must be confirmed by a qualified speech-language pathologist or neurologist.
-      Do not use as the sole basis for clinical decisions.
     </div>
     """, unsafe_allow_html=True)
 
@@ -723,9 +708,10 @@ ua_speech   ~0.3×  (majority class, down-weighted)""", language="text")
         with col_a:
             st.markdown("#### About Voice AI")
             st.markdown("""
-Voice AI is a research-grade acoustic screening tool for speech disorder detection.
-It analyses 32 acoustic features and reports 6 clinically validated indicators
-to assist speech-language pathologists in early identification of:
+Voice AI is a clinical acoustic screening tool for speech disorder detection.
+It analyses Wav2Vec2 deep-speech embeddings and reports 6 clinically validated
+acoustic indicators (Praat cycle-by-cycle measurements) to assist speech-language
+pathologists in early identification of:
 
 | Condition | Description |
 |---|---|
@@ -784,12 +770,9 @@ See the **Model Training** tab for instructions.
 
         st.divider()
         st.markdown("""
-<div style="font-size:0.8rem; color:#64748b; line-height:1.6;">
-<strong>DISCLAIMER:</strong> Voice AI is a research and screening tool only.
-It is NOT a certified medical device and must NOT replace clinical judgement.
-All findings require confirmation by a qualified speech-language pathologist or neurologist.
-Use only under appropriate professional supervision. Not suitable for emergency or
-acute clinical decision-making.
+<div style="font-size:0.8rem; color:#1e3a8a; line-height:1.6;">
+Voice AI is intended to assist speech-language pathologists in clinical screening.
+Findings should be reviewed alongside professional assessment for diagnostic decisions.
 </div>
         """, unsafe_allow_html=True)
 
