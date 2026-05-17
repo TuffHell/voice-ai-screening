@@ -229,7 +229,7 @@ def train(
     print('\n── Extracting Wav2Vec2 embeddings ──────────────────────────────')
     embedder = SpeechEmbedder(backbone=backbone, device=device, pooling='mean_std')
     X, y, spk = extract_embeddings(items, embedder, denoise=denoise,
-                                    augment_n=int(globals().get('AUGMENT_N', 1)))
+                                    augment_n=int(os.environ.get('AUGMENT_N', '1')))
     print(f'  Embeddings shape: {X.shape}')
 
     # ── Per-class speaker split: guarantee ≥1 speaker per class in test ───

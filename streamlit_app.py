@@ -269,6 +269,19 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
           f"jitter={indicators.jitter_pct:.2f}%, shimmer={indicators.shimmer_pct:.2f}%, "
           f"HNR={indicators.hnr_db:.1f} dB, F0={indicators.f0_mean_hz:.0f} Hz")
 
+    # ── Additional clinical features: pause distribution + CPP + articulation
+    t0 = _t.time()
+    from voice_ai.features import _pause_stats, _praat_indicators as _praat
+    pstats = _pause_stats(raw, 16000)
+    cpp_res = _praat(raw, 16000)
+    cpp_db  = cpp_res[3] if len(cpp_res) > 3 and cpp_res[3] is not None else 0.0
+    _step("Pause distribution + CPP (clinical fluency features)", t0,
+          f"voiced={pstats['voiced_frac']:.0%}, "
+          f"long pauses (≥500ms)={pstats['n_pause_500ms']}, "
+          f"(≥1s)={pstats['n_pause_1s']}, "
+          f"articulation rate={pstats['articulation_rate']:.2f} syl/s, "
+          f"CPP={cpp_db:.1f} dB")
+
     # Test-time augmentation: average embeddings over 3 mild perturbations of
     # the preprocessed audio for stability against mic/room variation.
     t0 = _t.time()
@@ -304,6 +317,73 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
     probs_cal = _apply_calibrators(raw_probs, model.calibrators)[0]
     _step("Isotonic calibration (per-class)", t0,
           f"calibrated probs: {dict(zip(short, [f'{p:.2f}' for p in probs_cal]))}")
+
+    # ── Prosody-based aphasia correction ──────────────────────────────
+    # Clinical justification: non-fluent (Broca-type) aphasia is characterised
+    # by long silent gaps and slow syllable rate while voice quality (HNR)
+    # remains normal, because the lesion affects motor planning, not phonation
+    # (Goodglass & Kaplan; Bastiaanse & van Zonneveld). The current model is
+    # trained on only ~47 real aphasic chunks from 1 speaker, so it under-fires
+    # on novel aphasic patterns. This rule adds an interpretable prosodic
+    # prior, transparently shown in the trace below.
+    t0 = _t.time()
+    if 'aphasia' in LABELS:
+        voiced_frac = pstats['voiced_frac']
+        sr_v        = indicators.speech_rate_est
+        hnr_v       = indicators.hnr_db
+        art_rate    = pstats['articulation_rate']
+        n_p500      = pstats['n_pause_500ms']
+        n_p1s       = pstats['n_pause_1s']
+
+        # Multi-cue aphasia signature (non-fluent / Broca-type):
+        # 1. Long silence fraction
+        # 2. Many long pauses (≥500ms, ≥1s)
+        # 3. Slow OVERALL speech rate
+        # 4. NORMAL articulation rate (distinguishes from dysarthria)
+        # 5. Healthy voice quality (rules out dysarthric phonation)
+        aph_score = 0.0
+        reasons = []
+        if voiced_frac < 0.60:
+            aph_score += min(0.30, (0.60 - voiced_frac) * 1.0)
+            reasons.append(f"voiced only {voiced_frac:.0%} of audio")
+        if n_p1s >= 2:
+            aph_score += min(0.20, 0.05 * n_p1s)
+            reasons.append(f"{n_p1s} long pauses ≥1s")
+        elif n_p500 >= 3:
+            aph_score += 0.10
+            reasons.append(f"{n_p500} pauses ≥500ms")
+        if sr_v < 2.5 and sr_v > 0:
+            aph_score += min(0.15, (2.5 - sr_v) * 0.10)
+            reasons.append(f"slow overall rate ({sr_v:.1f} syl/s)")
+        # Articulation rate distinguishes aphasia (~normal articulation,
+        # slow overall) from dysarthria (slow articulation AND slow overall).
+        if art_rate >= 3.0 and sr_v < 2.5:
+            aph_score += 0.15
+            reasons.append(f"normal articulation rate ({art_rate:.1f}) "
+                           f"but slow overall — non-fluent pattern")
+        if hnr_v >= 12 and indicators.jitter_pct < 3.0:
+            aph_score += 0.08
+            reasons.append(f"healthy phonation (HNR {hnr_v:.0f} dB, "
+                           f"jitter {indicators.jitter_pct:.1f}%) rules out dysarthria")
+        if aph_score > 0.05:
+            aph_idx = LABELS.index('aphasia')
+            old_aph = float(probs_cal[aph_idx])
+            new_aph = min(0.95, old_aph + aph_score)
+            delta   = new_aph - old_aph
+            # redistribute: take delta proportionally from the other classes
+            others = [i for i in range(len(LABELS)) if i != aph_idx]
+            other_sum = sum(probs_cal[i] for i in others) + 1e-9
+            for i in others:
+                probs_cal[i] = max(0.0, probs_cal[i] - delta * (probs_cal[i] / other_sum))
+            probs_cal[aph_idx] = new_aph
+            probs_cal = probs_cal / probs_cal.sum()
+            _step("Prosody-based aphasia correction", t0,
+                  f"+{aph_score:.2f} → aphasia (was {old_aph:.2f}, now {new_aph:.2f}); "
+                  f"triggers: {'; '.join(reasons)}")
+        else:
+            _step("Prosody-based aphasia correction", t0,
+                  f"no aphasic prosodic signature detected (voiced={voiced_frac:.0%}, "
+                  f"rate={sr_v:.1f} syl/s, HNR={hnr_v:.0f} dB)")
 
     from voice_ai_v2.model import _make_prediction
     prediction = _make_prediction(probs_cal)
@@ -663,7 +743,7 @@ DEMO_CONFIG = {
         "title":       "Control — Healthy Speech",
         "color":       "#60a5fa",
         "description": "Smooth voicing, regular pitch contour, clean harmonic structure. "
-                       "Jitter < 1.0%, shimmer < 3.8%, HNR > 20 dB on sustained vowels.",
+                       "Expected ranges on connected reading: jitter < 2.5%, shimmer < 12%, HNR > 10 dB.",
         "passage":     "The rainbow is a division of white light into many beautiful colors. "
                        "These take the shape of a long round arch, with its path high above, "
                        "and its two ends apparently beyond the horizon.",
@@ -881,11 +961,12 @@ def main():
     st.markdown("""
     <div style="display:flex; align-items:center; gap:12px; margin-bottom:0.5rem;">
       <div>
-        <h1 style="margin:0; font-size:1.6rem; font-weight:700; color:#0f172a;">
-          Voice AI — Speech Disorder Screening
+        <h1 style="margin:0; font-size:1.8rem; font-weight:700; color:#93c5fd;
+                   letter-spacing:-0.01em;">
+          Voice AI — Clinical Speech Screening
         </h1>
-        <p style="margin:0; color:#64748b; font-size:0.88rem;">
-          Acoustic analysis for dysarthria, aphasia and atypical speech detection
+        <p style="margin:0.3rem 0 0 0; color:#cbd5e1; font-size:0.92rem;">
+          Wav2Vec2 + Praat acoustic analysis for dysarthria, aphasia and control classification
         </p>
       </div>
     </div>
@@ -1088,16 +1169,19 @@ pathologists in early identification of:
 
             st.markdown("#### 6 Core Acoustic Indicators")
             st.markdown("""
-| Indicator | Normal Range | Clinical Significance |
+| Indicator | Normal (connected speech) | Clinical Significance |
 |---|---|---|
-| **Jitter** | < 1.04 % | Pitch cycle-to-cycle irregularity |
-| **Shimmer** | < 3.81 % | Amplitude cycle-to-cycle irregularity |
-| **HNR** | > 20 dB | Harmonics-to-Noise Ratio (voice quality) |
-| **F0 Mean** | 80–250 Hz | Fundamental frequency (pitch) |
-| **F0 Range** | > 50 Hz | Pitch variation (prosodic range) |
-| **Speech Rate** | 3.5–5.0 syl/s | Articulatory fluency |
+| **Jitter** | < 2.5 % | Pitch cycle-to-cycle irregularity |
+| **Shimmer** | < 12 % | Amplitude cycle-to-cycle irregularity |
+| **HNR** | > 10 dB | Harmonics-to-Noise Ratio (voice quality) |
+| **F0 Mean** | 70–280 Hz | Fundamental frequency (pitch) |
+| **F0 Range** | > 25 Hz | Pitch variation (prosodic range) |
+| **Speech Rate** | 2.5–6.0 syl/s | Articulatory fluency |
 
-*Reference ranges: Boersma & Weenink (Praat), Shrivastav et al., ASHA clinical guidelines.*
+*Ranges calibrated for **connected / conversational speech**, not sustained
+vowel phonation. Stricter sustained-vowel norms (jitter < 1.04 %, shimmer
+< 3.81 %, HNR > 20 dB; Boersma & Weenink) only apply to the /a/ phonation
+task and would produce excess false positives on reading samples.*
             """)
 
         with col_b:

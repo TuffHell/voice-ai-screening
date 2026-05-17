@@ -24,12 +24,17 @@ N_FEATURES = 32
 
 # ─── Clinical reference thresholds ────────────────────────────────────────────
 # Source: Boersma & Weenink (Praat), Shrivastav et al., and clinical SLP guidelines
-JITTER_NORMAL_MAX   = 1.04   # %
-SHIMMER_NORMAL_MAX  = 3.81   # %
-HNR_NORMAL_MIN      = 20.0   # dB
-F0_MEAN_RANGE       = (80, 250)   # Hz
-F0_RANGE_MIN        = 50.0   # Hz
-SPEECH_RATE_RANGE   = (3.5, 5.0)  # syllables/sec
+# Reference ranges for CONNECTED / CONVERSATIONAL speech.
+# (Sustained-vowel norms from Praat literature — jitter<1.04, shimmer<3.81,
+# HNR>20 dB — are stricter and only valid for the /a/ phonation task.
+# Connected speech naturally produces more variation, so using vowel norms here
+# produces excessive false-positive abnormality flags.)
+JITTER_NORMAL_MAX   = 2.5    # % — connected speech upper bound
+SHIMMER_NORMAL_MAX  = 12.0   # % — connected speech upper bound
+HNR_NORMAL_MIN      = 10.0   # dB — connected speech lower bound
+F0_MEAN_RANGE       = (70, 280)   # Hz — male/female adult range, broad
+F0_RANGE_MIN        = 25.0   # Hz — minimum prosodic range in conversational reading
+SPEECH_RATE_RANGE   = (2.5, 6.0)  # syllables/sec — broader natural range
 
 
 @dataclass
@@ -71,32 +76,87 @@ def _estimate_f0(audio: np.ndarray, sr: int) -> np.ndarray:
 
 def _praat_indicators(audio: np.ndarray, sr: int):
     """
-    Cycle-by-cycle jitter, shimmer, and HNR via Praat (parselmouth).
+    Cycle-by-cycle jitter, shimmer, HNR, and CPP via Praat (parselmouth).
 
-    Praat's `Get jitter (local)` and `Get shimmer (local)` are the clinical
-    gold standard (Boersma & Weenink). Returns (jitter_pct, shimmer_pct, hnr_db)
-    or (None, None, None) on failure.
+    Praat's `Get jitter (local)`, `Get shimmer (local)`, `Get mean (harmonicity)`
+    and CPP (Cepstral Peak Prominence) are the clinical gold standard
+    (Boersma & Weenink; Hillenbrand et al.). CPP is the most robust voice-quality
+    measure for connected speech — outperforms HNR when speech contains pauses.
+
+    Returns (jitter_pct, shimmer_pct, hnr_db, cpp_db).
     """
     try:
         import parselmouth
         from parselmouth.praat import call
     except Exception:
-        return None, None, None
+        return None, None, None, None
     try:
         snd = parselmouth.Sound(audio.astype(np.float64), sampling_frequency=sr)
         point_process = call(snd, "To PointProcess (periodic, cc)", 75, 500)
-        # Praat returns fractions in [0, 1]; convert to %
         jit = call(point_process, "Get jitter (local)", 0, 0, 0.0001, 0.02, 1.3)
         shi = call([snd, point_process], "Get shimmer (local)",
                    0, 0, 0.0001, 0.02, 1.3, 1.6)
         harm = call(snd, "To Harmonicity (cc)", 0.01, 75, 0.1, 1.0)
         hnr  = call(harm, "Get mean", 0, 0)
+        # CPP via PowerCepstrogram
+        try:
+            cepstrogram = call(snd, "To PowerCepstrogram", 60, 0.002, 5000, 50)
+            cpp = call(cepstrogram, "Get CPPS",
+                       True, 0.01, 0.001, 60, 330, 0.05,
+                       "Parabolic", 0.001, 0.0, "Exponential decay", "Robust slow")
+        except Exception:
+            cpp = None
         jit_pct = float(jit) * 100 if jit is not None and not np.isnan(jit) else 0.0
         shi_pct = float(shi) * 100 if shi is not None and not np.isnan(shi) else 0.0
         hnr_db  = float(hnr)        if hnr is not None and not np.isnan(hnr) else 0.0
-        return jit_pct, shi_pct, hnr_db
+        cpp_db  = float(cpp)        if cpp is not None and not np.isnan(cpp) else 0.0
+        return jit_pct, shi_pct, hnr_db, cpp_db
     except Exception:
-        return None, None, None
+        return None, None, None, None
+
+
+def _pause_stats(audio: np.ndarray, sr: int) -> dict:
+    """
+    Pause-distribution analysis on raw audio (no VAD applied yet).
+    Returns voiced fraction, count of long pauses (>500 ms, >1 s),
+    and articulation rate (syllables per *phonated* second, not total).
+    Clinically: non-fluent aphasia shows many long pauses; dysarthria reduces
+    articulation rate.
+    """
+    if len(audio) < int(sr * 0.5):
+        return {'voiced_frac': 0.0, 'n_pause_500ms': 0, 'n_pause_1s': 0,
+                'articulation_rate': 0.0}
+    # Frame energy
+    frame_len = 1024
+    hop = 256
+    n_frames = max(1, (len(audio) - frame_len) // hop + 1)
+    frames = np.lib.stride_tricks.sliding_window_view(audio, frame_len)[::hop][:n_frames]
+    rms = np.sqrt(np.mean(frames ** 2, axis=1) + 1e-12)
+    # Energy threshold: below 25th percentile considered "silence"
+    thr = np.percentile(rms, 25) * 1.2
+    voiced_mask = rms > thr
+    voiced_frac = float(np.mean(voiced_mask))
+    # Pause runs (consecutive silent frames)
+    pause_lens_sec = []
+    run = 0
+    frame_sec = hop / sr
+    for v in voiced_mask:
+        if not v:
+            run += 1
+        else:
+            if run > 0:
+                pause_lens_sec.append(run * frame_sec)
+            run = 0
+    if run > 0:
+        pause_lens_sec.append(run * frame_sec)
+    n_pause_500ms = sum(1 for p in pause_lens_sec if p >= 0.5)
+    n_pause_1s    = sum(1 for p in pause_lens_sec if p >= 1.0)
+    # Articulation rate: syllables / phonated time (not total time)
+    phonated_sec = max(0.1, voiced_frac * len(audio) / sr)
+    sr_total = _speech_rate(audio, sr)
+    art_rate = (sr_total * (len(audio) / sr)) / phonated_sec
+    return {'voiced_frac': voiced_frac, 'n_pause_500ms': n_pause_500ms,
+            'n_pause_1s': n_pause_1s, 'articulation_rate': float(art_rate)}
 
 
 def _speech_rate(audio: np.ndarray, sr: int) -> float:
@@ -120,7 +180,8 @@ def extract_clinical_indicators(audio: np.ndarray, sr: int = SAMPLE_RATE) -> Cli
     Audio should be at least 1 second long for reliable estimates.
     """
     f0 = _estimate_f0(audio, sr)
-    jit, shi, hnr = _praat_indicators(audio, sr)
+    res = _praat_indicators(audio, sr)
+    jit, shi, hnr = res[0], res[1], res[2]
     return ClinicalIndicators(
         jitter_pct     = round(jit if jit is not None else 0.0, 4),
         shimmer_pct    = round(shi if shi is not None else 0.0, 4),
