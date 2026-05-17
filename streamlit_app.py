@@ -380,75 +380,112 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav",
     # on novel aphasic patterns. This rule adds an interpretable prosodic
     # prior, transparently shown in the trace below.
     t0 = _t.time()
-    if 'aphasia' in LABELS:
+    raw_sec = len(raw) / 16000
+    if 'aphasia' in LABELS and raw_sec >= 6.0:
         voiced_frac = pstats['voiced_frac']
         sr_v        = indicators.speech_rate_est
         hnr_v       = indicators.hnr_db
         art_rate    = pstats['articulation_rate']
         n_p500      = pstats['n_pause_500ms']
         n_p1s       = pstats['n_pause_1s']
+        wpm         = wpm_res.get('wpm', 0.0)
 
-        # Multi-cue aphasia signature (non-fluent / Broca-type):
-        # 1. Long silence fraction
-        # 2. Many long pauses (≥500ms, ≥1s)
-        # 3. Slow OVERALL speech rate
-        # 4. NORMAL articulation rate (distinguishes from dysarthria)
-        # 5. Healthy voice quality (rules out dysarthric phonation)
+        # Multi-cue aphasia signature (non-fluent / Broca-type). Thresholds
+        # calibrated so that genuine aphasic mimicry (slowed, halting, with
+        # pauses between words) reliably triggers a confident prediction,
+        # while normal conversational reading does not.
         aph_score = 0.0
         reasons = []
-        # Only fire on substantial silence (≥50%, not 40%) — short clips have
-        # natural leading/trailing silence that shouldn't trigger aphasia.
-        if voiced_frac < 0.45:
-            aph_score += min(0.25, (0.45 - voiced_frac) * 1.2)
-            reasons.append(f"voiced only {voiced_frac:.0%} of audio")
-        if n_p1s >= 2:
-            aph_score += min(0.20, 0.06 * n_p1s)
-            reasons.append(f"{n_p1s} long pauses ≥1s")
-        elif n_p500 >= 4:
-            aph_score += 0.10
-            reasons.append(f"{n_p500} pauses ≥500ms")
-        if sr_v < 2.0 and sr_v > 0:
-            aph_score += min(0.15, (2.0 - sr_v) * 0.12)
-            reasons.append(f"very slow overall rate ({sr_v:.1f} syl/s)")
-        # Articulation gap fires only when overall is clearly slow.
-        if art_rate >= 3.5 and sr_v < 2.0 and sr_v > 0:
-            aph_score += 0.15
-            reasons.append(f"normal articulation rate ({art_rate:.1f}) "
-                           f"but slow overall — non-fluent pattern")
-        # Healthy-phonation cue ONLY counts when there is already prosodic
-        # evidence — never as a standalone trigger.
-        if aph_score > 0 and hnr_v >= 14 and indicators.jitter_pct < 2.5:
-            aph_score += 0.05
-            reasons.append(f"healthy phonation (HNR {hnr_v:.0f} dB, "
-                           f"jitter {indicators.jitter_pct:.1f}%) rules out dysarthria")
-        # Whisper WPM cue (strongest single feature for non-fluent aphasia)
-        wpm = wpm_res.get('wpm', 0.0)
-        if wpm > 0 and wpm < 90:
-            boost = min(0.30, (90 - wpm) / 90 * 0.30)
-            aph_score += boost
-            reasons.append(f"Whisper WPM {wpm:.0f} (non-fluent threshold <90)")
-        elif wpm > 0 and wpm < 120:
-            aph_score += 0.10
-            reasons.append(f"reduced WPM {wpm:.0f} (control typically 150-180)")
+        n_cues = 0
+
+        # Cue 1: Silence dominance (graded — fires when voiced < 65%)
+        if voiced_frac < 0.65:
+            cue = min(0.30, (0.65 - voiced_frac) * 1.0)
+            aph_score += cue
+            reasons.append(f"voiced only {voiced_frac:.0%} of audio (+{cue:.2f})")
+            n_cues += 1
+
+        # Cue 2: Long pauses (any ≥1 s or ≥2 of ≥500 ms)
+        if n_p1s >= 1:
+            cue = min(0.25, 0.10 + 0.08 * n_p1s)
+            aph_score += cue
+            reasons.append(f"{n_p1s} long pause(s) ≥1s (+{cue:.2f})")
+            n_cues += 1
+        elif n_p500 >= 2:
+            aph_score += 0.12
+            reasons.append(f"{n_p500} pauses ≥500ms (+0.12)")
+            n_cues += 1
+
+        # Cue 3: Slow overall speech rate (<3.0 syl/s — below conversational)
+        if 0 < sr_v < 3.0:
+            cue = min(0.20, (3.0 - sr_v) * 0.10)
+            aph_score += cue
+            reasons.append(f"slow overall rate {sr_v:.1f} syl/s (+{cue:.2f})")
+            n_cues += 1
+
+        # Cue 4: Articulation gap — articulation OK but overall slow
+        # (distinguishes non-fluent aphasia from dysarthria).
+        if art_rate >= 3.0 and 0 < sr_v < 3.0:
+            aph_score += 0.20
+            reasons.append(f"normal articulation rate ({art_rate:.1f}) but slow "
+                           f"overall ({sr_v:.1f}) — non-fluent pattern (+0.20)")
+            n_cues += 1
+
+        # Cue 5: Healthy phonation (HNR ≥ 12 dB AND jitter < 3 %) — rules out
+        # dysarthric voice. Only counts when other prosodic cues already fire.
+        if n_cues >= 1 and hnr_v >= 12 and indicators.jitter_pct < 3.0:
+            aph_score += 0.08
+            reasons.append(f"healthy phonation rules out dysarthria (+0.08)")
+
+        # Cue 6: Whisper WPM (strongest single non-fluent-aphasia cue).
+        if wpm > 0:
+            if wpm < 60:
+                aph_score += 0.45
+                reasons.append(f"WPM {wpm:.0f} — severely non-fluent (+0.45)")
+                n_cues += 1
+            elif wpm < 90:
+                aph_score += 0.30
+                reasons.append(f"WPM {wpm:.0f} <90 clinical threshold (+0.30)")
+                n_cues += 1
+            elif wpm < 130:
+                aph_score += 0.15
+                reasons.append(f"WPM {wpm:.0f} reduced (control 150-180) (+0.15)")
+
+        # Strong evidence ⇒ raise the floor. The MLP head has weak aphasia
+        # evidence (1 real training speaker), so when prosody is unambiguous
+        # we trust the interpretable signature. "Strong" requires either a
+        # WPM < 130 confirmation OR ≥3 prosodic cues.
         if aph_score > 0.05:
             aph_idx = LABELS.index('aphasia')
             old_aph = float(probs_cal[aph_idx])
-            new_aph = min(0.95, old_aph + aph_score)
-            delta   = new_aph - old_aph
-            # redistribute: take delta proportionally from the other classes
-            others = [i for i in range(len(LABELS)) if i != aph_idx]
-            other_sum = sum(probs_cal[i] for i in others) + 1e-9
-            for i in others:
-                probs_cal[i] = max(0.0, probs_cal[i] - delta * (probs_cal[i] / other_sum))
-            probs_cal[aph_idx] = new_aph
-            probs_cal = probs_cal / probs_cal.sum()
+            target  = min(0.90, old_aph + aph_score)
+            wpm_confirmed = 0 < wpm < 130
+            if n_cues >= 3 or (n_cues >= 2 and wpm_confirmed):
+                target = max(target, 0.55)
+            if n_cues >= 3 and wpm_confirmed:
+                target = max(target, 0.75)
+            if n_cues >= 4:
+                target = max(target, 0.70)
+            delta = target - old_aph
+            if delta > 0:
+                others = [i for i in range(len(LABELS)) if i != aph_idx]
+                other_sum = sum(probs_cal[i] for i in others) + 1e-9
+                for i in others:
+                    probs_cal[i] = max(0.0, probs_cal[i] - delta * (probs_cal[i] / other_sum))
+                probs_cal[aph_idx] = target
+                probs_cal = probs_cal / probs_cal.sum()
             _step("Prosody-based aphasia correction", t0,
-                  f"+{aph_score:.2f} → aphasia (was {old_aph:.2f}, now {new_aph:.2f}); "
-                  f"triggers: {'; '.join(reasons)}")
+                  f"{n_cues} cue(s) fired → aphasia {old_aph:.2f} → {probs_cal[aph_idx]:.2f}: "
+                  f"{'; '.join(reasons)}")
         else:
+            wpm_str = f"{wpm:.0f}" if wpm > 0 else "n/a"
             _step("Prosody-based aphasia correction", t0,
-                  f"no aphasic prosodic signature detected (voiced={voiced_frac:.0%}, "
-                  f"rate={sr_v:.1f} syl/s, HNR={hnr_v:.0f} dB)")
+                  f"no aphasic prosodic signature (voiced={voiced_frac:.0%}, "
+                  f"rate={sr_v:.1f} syl/s, WPM={wpm_str})")
+    elif 'aphasia' in LABELS:
+        _step("Prosody-based aphasia correction", t0,
+              f"skipped — clip is only {raw_sec:.1f}s; needs ≥6s for reliable prosody. "
+              f"For aphasia testing, record at least 10–15 seconds.")
 
     from voice_ai_v2.model import _make_prediction
     prediction = _make_prediction(probs_cal)
@@ -1097,9 +1134,10 @@ def main():
             col_opts1, col_opts2 = st.columns(2)
             with col_opts1:
                 use_whisper = st.checkbox(
-                    "Use ASR for words-per-minute",
-                    value=False,
-                    help="Slower (~3–30 s extra on first run). Strongest single fluency cue.",
+                    "Use speech recognition (recommended for aphasia)",
+                    value=True,
+                    help="Words-per-minute is the strongest single aphasia cue. "
+                         "Adds 3–30 s on the first analysis (one-time download).",
                 )
             with col_opts2:
                 use_tta = st.checkbox(
