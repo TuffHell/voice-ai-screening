@@ -39,31 +39,76 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-html, body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; color: #0f172a; }
+html, body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #e2e8f0;
+}
 
-/* App background */
-.stApp { background: linear-gradient(180deg, #f0f6ff 0%, #e0eaff 100%); color: #0f172a; }
+/* ── App background: deep slate, clinical ── */
+.stApp {
+    background: linear-gradient(180deg, #0b1220 0%, #0f1a2e 100%);
+    color: #e2e8f0;
+}
 
-/* Force readable text everywhere in the main area */
-.stApp .main, .stApp .main * { color: #0f172a; }
-.stApp .main h1, .stApp .main h2, .stApp .main h3, .stApp .main h4, .stApp .main h5 { color: #1e3a8a !important; }
-.stApp .main label, .stApp .main p, .stApp .main span, .stApp .main div { color: #0f172a; }
+/* Force readable light text everywhere in the main area */
+.stApp .main, .stApp .main * { color: #e2e8f0; }
+.stApp .main h1, .stApp .main h2, .stApp .main h3, .stApp .main h4, .stApp .main h5 {
+    color: #93c5fd !important;
+    font-weight: 600;
+}
+.stApp .main label, .stApp .main p, .stApp .main span, .stApp .main div { color: #e2e8f0; }
 .stApp .main .stRadio label, .stApp .main .stCheckbox label,
 .stApp .main .stSelectbox label, .stApp .main .stTextInput label,
-.stApp .main .stFileUploader label { color: #1e3a8a !important; font-weight: 500; }
-.stApp .main .stMarkdown { color: #0f172a; }
-.stApp .main code { background: #dbeafe; color: #1e3a8a; padding: 0.1em 0.4em; border-radius: 4px; }
-
-/* Sidebar — deep navy */
-section[data-testid="stSidebar"] {
-    background: #0c1d3d;
-    border-right: 1px solid #1e3a8a;
+.stApp .main .stFileUploader label,
+.stApp .main .stRadio div[role="radiogroup"] label,
+.stApp .main .stRadio div[role="radiogroup"] label p {
+    color: #f1f5f9 !important; font-weight: 500;
 }
-section[data-testid="stSidebar"] * { color: #dbeafe !important; }
+.stApp .main .stMarkdown { color: #e2e8f0; }
+.stApp .main code {
+    background: #1e293b; color: #93c5fd;
+    padding: 0.1em 0.4em; border-radius: 4px;
+    border: 1px solid #334155;
+}
+.stApp .main a { color: #60a5fa; }
+.stApp .main hr { border-color: #1e293b; }
+
+/* Input controls */
+.stApp .main .stTextInput input,
+.stApp .main .stSelectbox div[data-baseweb="select"] > div,
+.stApp .main .stNumberInput input,
+.stApp .main .stTextArea textarea {
+    background: #1e293b !important;
+    color: #f1f5f9 !important;
+    border: 1px solid #334155 !important;
+}
+
+/* File uploader drop zone */
+.stApp .main [data-testid="stFileUploaderDropzone"] {
+    background: #1e293b;
+    border: 1px dashed #475569;
+    color: #cbd5e1;
+}
+
+/* Tables */
+.stApp .main table { color: #e2e8f0; }
+.stApp .main thead th { background: #1e293b; color: #93c5fd !important; }
+.stApp .main tbody tr { background: #0f1a2e; }
+.stApp .main tbody tr:nth-child(even) { background: #131f36; }
+
+/* Audio player */
+.stApp .main audio { filter: invert(0.9) hue-rotate(180deg); border-radius: 6px; }
+
+/* Sidebar — almost black */
+section[data-testid="stSidebar"] {
+    background: #060b18;
+    border-right: 1px solid #1e293b;
+}
+section[data-testid="stSidebar"] * { color: #cbd5e1 !important; }
 section[data-testid="stSidebar"] .stMarkdown h3 {
-    color: #93c5fd !important;
-    font-size: 0.75rem; font-weight: 600;
-    letter-spacing: 0.08em; text-transform: uppercase;
+    color: #60a5fa !important;
+    font-size: 0.75rem; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase;
     margin-top: 1.4rem;
 }
 
@@ -71,67 +116,71 @@ section[data-testid="stSidebar"] .stMarkdown h3 {
     padding-top: 1rem; padding-bottom: 2rem; max-width: 1200px;
 }
 
-/* Result cards — all blue family */
+/* Result cards — dark with blue accents */
 .result-card-high {
-    background: linear-gradient(135deg, #dbeafe, #bfdbfe);
-    border: 2px solid #2563eb;
+    background: linear-gradient(135deg, #0f1d3a, #1e3a8a);
+    border: 1px solid #2563eb;
     border-radius: 12px; padding: 1.5rem 2rem;
+    box-shadow: 0 4px 16px rgba(37,99,235,0.15);
 }
 .result-card-moderate {
-    background: linear-gradient(135deg, #e0e7ff, #c7d2fe);
-    border: 2px solid #4f46e5;
+    background: linear-gradient(135deg, #18213b, #1e293b);
+    border: 1px solid #3b82f6;
     border-radius: 12px; padding: 1.5rem 2rem;
 }
 .result-card-uncertain {
-    background: linear-gradient(135deg, #eff6ff, #dbeafe);
-    border: 2px dashed #60a5fa;
+    background: linear-gradient(135deg, #131c30, #1e293b);
+    border: 1px dashed #60a5fa;
     border-radius: 12px; padding: 1.5rem 2rem;
 }
+.result-card-high *, .result-card-moderate *, .result-card-uncertain * { color: #f1f5f9 !important; }
 
 /* Metric cards */
 .metric-card {
-    background: #ffffff;
-    border: 1px solid #bfdbfe;
-    border-left: 4px solid #2563eb;
+    background: #131f36;
+    border: 1px solid #1e293b;
+    border-left: 4px solid #3b82f6;
     border-radius: 10px;
     padding: 1rem 1.2rem; text-align: center;
-    box-shadow: 0 2px 4px rgba(37,99,235,0.05);
 }
-.metric-label { font-size: 0.75rem; color: #1e40af; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
-.metric-value { font-size: 1.6rem; font-weight: 700; color: #1e3a8a; margin: 0.2rem 0; }
-.metric-range { font-size: 0.72rem; color: #64748b; }
-.metric-normal   { color: #1d4ed8 !important; }
-.metric-abnormal { color: #1e3a8a !important; border-color: #f59e0b; }
+.metric-label { font-size: 0.72rem; color: #60a5fa; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; }
+.metric-value { font-size: 1.6rem; font-weight: 700; color: #f1f5f9; margin: 0.2rem 0; }
+.metric-range { font-size: 0.72rem; color: #94a3b8; }
+.metric-normal   { color: #60a5fa !important; }
+.metric-abnormal { color: #fbbf24 !important; }
+.metric-card.abnormal { border-left-color: #fbbf24; }
 
 /* Section headings */
 .section-heading {
-    font-size: 0.78rem; font-weight: 600;
-    letter-spacing: 0.08em; text-transform: uppercase;
-    color: #1e40af;
-    border-bottom: 1px solid #bfdbfe;
+    font-size: 0.75rem; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: #60a5fa;
+    border-bottom: 1px solid #1e293b;
     padding-bottom: 0.4rem;
     margin: 1.5rem 0 0.8rem 0;
 }
 
-/* Confidence badges — blue family */
-.badge-high      { background: #1d4ed8; color: #ffffff; padding: 3px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
-.badge-moderate  { background: #3b82f6; color: #ffffff; padding: 3px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
-.badge-uncertain { background: #93c5fd; color: #1e3a8a; padding: 3px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
+/* Confidence badges */
+.badge-high      { background: #2563eb; color: #ffffff; padding: 3px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
+.badge-moderate  { background: #1e40af; color: #ffffff; padding: 3px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
+.badge-uncertain { background: #334155; color: #93c5fd; padding: 3px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; }
 
 /* Tabs */
 .stTabs [data-baseweb="tab-list"] {
     gap: 4px;
-    border-bottom: 2px solid #bfdbfe;
+    border-bottom: 1px solid #1e293b;
+    background: transparent;
 }
 .stTabs [data-baseweb="tab"] {
-    font-size: 0.88rem; font-weight: 500; color: #475569;
+    font-size: 0.88rem; font-weight: 500; color: #94a3b8;
+    background: transparent;
 }
 .stTabs [aria-selected="true"] {
-    color: #1d4ed8 !important;
-    border-bottom: 2px solid #1d4ed8;
+    color: #60a5fa !important;
+    border-bottom: 2px solid #2563eb;
 }
 
-/* Buttons — blue */
+/* Buttons */
 .stButton > button {
     font-weight: 600;
     border-radius: 8px;
@@ -143,11 +192,13 @@ section[data-testid="stSidebar"] .stMarkdown h3 {
 .stButton > button:hover {
     background: #1d4ed8;
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(37,99,235,0.25);
+    box-shadow: 0 4px 12px rgba(37,99,235,0.35);
 }
 
-/* Headings */
-h1, h2, h3, h4 { color: #1e3a8a; }
+/* Expander */
+.stApp .main .streamlit-expanderHeader { background: #131f36; color: #93c5fd !important; border: 1px solid #1e293b; }
+.stApp .main details { background: #131f36; border-radius: 8px; }
+.stApp .main details summary { color: #93c5fd !important; }
 
 /* Hide Streamlit branding */
 #MainMenu, footer { visibility: hidden; }
@@ -578,6 +629,222 @@ def render_sidebar():
         )
 
 
+# ─── Demonstrations tab ───────────────────────────────────────────────────────
+
+DEMO_CONFIG = {
+    "control": {
+        "title":       "Control — Healthy Speech",
+        "color":       "#60a5fa",
+        "description": "Smooth voicing, regular pitch contour, clean harmonic structure. "
+                       "Jitter < 1.0%, shimmer < 3.8%, HNR > 20 dB on sustained vowels.",
+        "passage":     "The rainbow is a division of white light into many beautiful colors. "
+                       "These take the shape of a long round arch, with its path high above, "
+                       "and its two ends apparently beyond the horizon.",
+        "tip":         "Read in a relaxed conversational pace. Even, sustained phonation.",
+        "gait":        "steady",
+    },
+    "dysarthria": {
+        "title":       "Dysarthria — Motor Speech Disorder",
+        "color":       "#f59e0b",
+        "description": "Weak, slurred, or slow articulation from neuromuscular impairment "
+                       "(stroke, Parkinson's, ALS). Elevated jitter (>2%), shimmer (>10%), "
+                       "reduced HNR, narrowed pitch range.",
+        "passage":     "Pa-ta-ka, pa-ta-ka, pa-ta-ka. The big black bug bit the big black bear. "
+                       "Methodist Episcopal. Aluminum linoleum.",
+        "tip":         "Diadochokinetic (DDK) task. Try at maximum speed — uneven syllable "
+                       "timing or imprecise consonants resemble dysarthric speech.",
+        "gait":        "asymmetric",
+    },
+    "aphasia": {
+        "title":       "Aphasia — Language Disorder",
+        "color":       "#a78bfa",
+        "description": "Difficulty producing or comprehending language, typically from left-"
+                       "hemisphere stroke. Halting speech, word-finding pauses, telegraphic "
+                       "phrases. Long voiceless gaps in acoustic envelope.",
+        "passage":     "Cookie... the boy... falling. Stool. Mother... washing. Water... over.",
+        "tip":         "Read with long unnatural pauses between content words. Omit function "
+                       "words (the, is, and). Mimics Broca-type non-fluent aphasia.",
+        "gait":        "halting",
+    },
+    "ua_speech": {
+        "title":       "Atypical Speech — Severe Intelligibility Loss",
+        "color":       "#ec4899",
+        "description": "Severely reduced intelligibility from cerebral palsy or advanced "
+                       "neuromotor disease. Highly irregular voicing, prolonged segments, "
+                       "very low HNR, extreme jitter/shimmer.",
+        "passage":     "Aaaaa... uuuu... eee... (sustained vowels with intentional tremor)",
+        "tip":         "Hold a vowel /a/ for 3 seconds with audible tremor and amplitude "
+                       "irregularity. Mimics UA-Speech atypical phonation.",
+        "gait":        "tremor",
+    },
+}
+
+
+def make_stick_figure(gait: str, color: str = "#60a5fa"):
+    """3D plotly skeleton animation illustrating gait/movement disturbance per condition."""
+    import plotly.graph_objects as go
+
+    N_FRAMES = 30
+
+    def joints(t: float):
+        """Return 13 joint coordinates (head, neck, shoulders, elbows, hands, hip, knees, feet)."""
+        # base walking gait
+        stride = 0.35
+        knee_lift = 0.18
+        arm_swing = 0.25
+        tremor_x = 0.0
+        asymm = 0.0
+        gap = 1.0  # phase coherence
+
+        if gait == "asymmetric":
+            asymm = 0.15 * np.sin(t * 2 * np.pi)
+            stride *= 0.6
+            knee_lift *= 0.4
+        elif gait == "halting":
+            # freeze for parts of cycle
+            gap = 1.0 if (t % 1.0) < 0.55 else 0.0
+        elif gait == "tremor":
+            tremor_x = 0.04 * np.sin(t * 2 * np.pi * 8)
+
+        phase = t * 2 * np.pi * gap
+        # walking offset along y axis
+        y_walk = t * 1.6
+        # leg phases
+        l_leg = np.sin(phase)
+        r_leg = -np.sin(phase)
+        l_arm = -np.sin(phase) * arm_swing
+        r_arm =  np.sin(phase) * arm_swing
+
+        hip   = (0 + tremor_x + asymm,    y_walk,     0.95)
+        neck  = (0 + tremor_x,            y_walk,     1.45)
+        head  = (0 + tremor_x,            y_walk,     1.70)
+        l_sh  = (-0.18 + tremor_x,        y_walk,     1.40)
+        r_sh  = ( 0.18 + tremor_x,        y_walk,     1.40)
+        l_el  = (-0.22 + tremor_x,        y_walk + l_arm * 0.6, 1.10)
+        r_el  = ( 0.22 + tremor_x,        y_walk + r_arm * 0.6, 1.10)
+        l_hd  = (-0.24 + tremor_x,        y_walk + l_arm,       0.85)
+        r_hd  = ( 0.24 + tremor_x,        y_walk + r_arm,       0.85)
+        l_kn  = (-0.10,                   y_walk + l_leg * stride * 0.5, 0.55 + max(0, l_leg) * knee_lift)
+        r_kn  = ( 0.10,                   y_walk + r_leg * stride * 0.5, 0.55 + max(0, r_leg) * knee_lift)
+        l_ft  = (-0.10,                   y_walk + l_leg * stride,       0.05)
+        r_ft  = ( 0.10,                   y_walk + r_leg * stride,       0.05)
+        return [head, neck, l_sh, l_el, l_hd, r_sh, r_el, r_hd, hip, l_kn, l_ft, r_kn, r_ft]
+
+    # Edges as pairs of joint indices
+    bones = [(0, 1), (1, 2), (2, 3), (3, 4), (1, 5), (5, 6), (6, 7),
+             (1, 8), (8, 9), (9, 10), (8, 11), (11, 12)]
+
+    def frame_traces(t: float):
+        j = joints(t)
+        xs, ys, zs = [], [], []
+        for a, b in bones:
+            xs += [j[a][0], j[b][0], None]
+            ys += [j[a][1], j[b][1], None]
+            zs += [j[a][2], j[b][2], None]
+        skeleton = go.Scatter3d(x=xs, y=ys, z=zs, mode='lines',
+                                line=dict(color=color, width=8))
+        jx = [p[0] for p in j]; jy = [p[1] for p in j]; jz = [p[2] for p in j]
+        markers = go.Scatter3d(x=jx, y=jy, z=jz, mode='markers',
+                               marker=dict(color=color, size=5,
+                                           line=dict(color='#0b1220', width=1)))
+        return [skeleton, markers]
+
+    times = np.linspace(0, 2.0, N_FRAMES)
+    frames = [go.Frame(data=frame_traces(t), name=f"{i}") for i, t in enumerate(times)]
+    fig = go.Figure(data=frame_traces(times[0]), frames=frames)
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(range=[-1.2, 1.2], showbackground=False, color='#475569',
+                       gridcolor='#1e293b', title=''),
+            yaxis=dict(range=[-0.5, 4.0], showbackground=False, color='#475569',
+                       gridcolor='#1e293b', title=''),
+            zaxis=dict(range=[0, 2.2],   showbackground=False, color='#475569',
+                       gridcolor='#1e293b', title=''),
+            bgcolor='#0b1220',
+            aspectratio=dict(x=1, y=2.5, z=1.2),
+            camera=dict(eye=dict(x=2.2, y=-1.2, z=0.6)),
+        ),
+        paper_bgcolor='#0b1220', plot_bgcolor='#0b1220',
+        margin=dict(l=0, r=0, t=0, b=0), height=320,
+        showlegend=False,
+        updatemenus=[dict(
+            type="buttons", showactive=False, x=0.05, y=0.05,
+            bgcolor='#1e293b', font=dict(color='#93c5fd'),
+            buttons=[
+                dict(label="▶ Play", method="animate",
+                     args=[None, {"frame": {"duration": 60, "redraw": True},
+                                  "fromcurrent": True, "transition": {"duration": 0},
+                                  "mode": "immediate"}]),
+                dict(label="⏸ Pause", method="animate",
+                     args=[[None], {"frame": {"duration": 0, "redraw": False},
+                                    "mode": "immediate"}]),
+            ],
+        )],
+    )
+    return fig
+
+
+def render_demonstrations():
+    st.markdown("#### Speech Disorder Demonstrations")
+    st.markdown(
+        "<div style='color:#cbd5e1; font-size:0.9rem; margin-bottom:1rem;'>"
+        "Listen to real patient samples, watch how motor symptoms affect movement, "
+        "and read clinical passages that produce confident detections.</div>",
+        unsafe_allow_html=True,
+    )
+
+    classes = ["control", "dysarthria", "aphasia", "ua_speech"]
+    sub_tabs = st.tabs([DEMO_CONFIG[c]["title"].split(" — ")[0] for c in classes])
+
+    for cls, t in zip(classes, sub_tabs):
+        with t:
+            cfg = DEMO_CONFIG[cls]
+            st.markdown(f"### {cfg['title']}")
+            st.markdown(
+                f"<div style='color:#cbd5e1; padding:0.8rem 1rem; background:#131f36; "
+                f"border-left:4px solid {cfg['color']}; border-radius:6px; margin-bottom:1rem;'>"
+                f"{cfg['description']}</div>",
+                unsafe_allow_html=True,
+            )
+
+            col_audio, col_anim = st.columns([1, 1])
+
+            with col_audio:
+                st.markdown('<p class="section-heading">Real Patient Samples</p>',
+                            unsafe_allow_html=True)
+                for i in (1, 2):
+                    sample = Path(f"assets/samples/{cls}_{i}.wav")
+                    if sample.exists():
+                        st.markdown(f"**Sample {i}**")
+                        st.audio(str(sample))
+                    else:
+                        st.caption(f"Sample {i} not bundled.")
+
+            with col_anim:
+                st.markdown('<p class="section-heading">Motor Signature</p>',
+                            unsafe_allow_html=True)
+                fig = make_stick_figure(cfg["gait"], color=cfg["color"])
+                st.plotly_chart(fig, use_container_width=True,
+                                config={"displayModeBar": False})
+                gait_label = {
+                    "steady":     "Steady symmetric gait — control baseline",
+                    "asymmetric": "Reduced stride, asymmetric arm swing — Parkinsonian-type",
+                    "halting":    "Halting, intermittent freezing — Broca-aphasic analogue",
+                    "tremor":     "High-frequency tremor — atypical neuromotor",
+                }[cfg["gait"]]
+                st.caption(gait_label)
+
+            st.markdown('<p class="section-heading">Clinical Reading Passage</p>',
+                        unsafe_allow_html=True)
+            st.markdown(
+                f"<div style='font-size:1.05rem; line-height:1.6; padding:1rem 1.2rem; "
+                f"background:#131f36; border:1px solid #1e293b; border-radius:8px; "
+                f"color:#f1f5f9; font-style:italic;'>“{cfg['passage']}”</div>",
+                unsafe_allow_html=True,
+            )
+            st.caption(f"How to read: {cfg['tip']}")
+
+
 # ─── Main application ─────────────────────────────────────────────────────────
 
 def main():
@@ -598,8 +865,8 @@ def main():
     """, unsafe_allow_html=True)
 
     # Main tabs
-    tab_analyse, tab_history, tab_train, tab_about = st.tabs([
-        "New Analysis", "History", "Model Training", "About"
+    tab_analyse, tab_demo, tab_history, tab_train, tab_about = st.tabs([
+        "New Analysis", "Demonstrations", "History", "Model Training", "About"
     ])
 
     # ── Tab 1: New Analysis ──────────────────────────────────────────────────
@@ -669,7 +936,11 @@ def main():
             st.divider()
             render_results(st.session_state.last_result)
 
-    # ── Tab 2: History ───────────────────────────────────────────────────────
+    # ── Tab 2: Demonstrations ────────────────────────────────────────────────
+    with tab_demo:
+        render_demonstrations()
+
+    # ── Tab 3: History ───────────────────────────────────────────────────────
     with tab_history:
         if not st.session_state.history:
             st.info("No analyses performed in this session yet.")
