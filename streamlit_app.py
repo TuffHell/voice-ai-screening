@@ -225,6 +225,8 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
     import time as _t
     import librosa
     from voice_ai.features import extract_clinical_indicators
+    from voice_ai_v2.preprocessing import preprocess as v2_preprocess
+    from voice_ai_v2 import LABELS
 
     trace = []
     def _step(name: str, t0: float, detail: str = ""):
@@ -243,40 +245,58 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
         raw = raw.astype(np.float32)
         _step("Load & resample audio", t0,
               f"loaded {len(raw)/16000:.2f}s @ 16 kHz mono ({len(raw):,} samples)")
+
+        # Run the SAME preprocessing the model was trained on (bandpass + loudness
+        # norm + Silero VAD). Mismatch here causes the model to misclassify mic
+        # audio as the closest pathological class. This step is critical.
+        t0 = _t.time()
+        proc = v2_preprocess(tmp_path, apply_vad=True, apply_denoise=False)
+        _step("Match-train preprocessing (bandpass + loudness + VAD)", t0,
+              f"{len(proc)/16000:.2f}s after VAD; -23 LUFS normalised; 80-8000 Hz bandpass")
     finally:
         os.unlink(tmp_path)
 
     t0 = _t.time()
     indicators = extract_clinical_indicators(raw)
-    _step("Extract acoustic indicators (Praat)", t0,
+    _step("Extract acoustic indicators (Praat on raw audio)", t0,
           f"jitter={indicators.jitter_pct:.2f}%, shimmer={indicators.shimmer_pct:.2f}%, "
           f"HNR={indicators.hnr_db:.1f} dB, F0={indicators.f0_mean_hz:.0f} Hz")
 
+    # Test-time augmentation: average embeddings over 3 mild perturbations of
+    # the preprocessed audio for stability against mic/room variation.
     t0 = _t.time()
-    model.clear_session()
-    emb = model.embedder.embed(raw, sr=16000)
-    _step("Wav2Vec2 embedding (frozen backbone)", t0,
-          f"{emb.shape[0]}-dim mean+std pooled embedding from facebook/wav2vec2-base-960h")
+    import torch as _torch
+    rng = np.random.default_rng(0)
+    views = [proc]
+    if len(proc) > 16000:
+        views.append((proc * rng.uniform(0.85, 1.15)).astype(np.float32))      # gain jitter
+        noise = rng.normal(0, 0.003, len(proc)).astype(np.float32)
+        views.append((proc + noise).clip(-1, 1).astype(np.float32))             # tiny noise
+    emb_list = [model.embedder.embed(v, sr=16000) for v in views]
+    emb = np.mean(np.stack(emb_list, axis=0), axis=0)
+    _step("Wav2Vec2 embedding (TTA × " + str(len(views)) + ")", t0,
+          f"{emb.shape[0]}-dim mean+std embedding; averaged over {len(views)} "
+          f"augmented views for stability")
 
     t0 = _t.time()
     emb_s = model.scaler.transform(emb.reshape(1, -1))
     _step("Standardize features (StandardScaler)", t0,
           f"z-scored {emb_s.shape[1]} features against training distribution")
 
-    import torch as _torch
     t0 = _t.time()
     with _torch.no_grad():
         logits = model.head(_torch.tensor(emb_s, dtype=_torch.float32,
                                           device=model.device)).cpu().numpy()
     from voice_ai_v2.train import _softmax_np, _apply_calibrators
     raw_probs = _softmax_np(logits)
+    short = [l[:3] for l in LABELS]
     _step("Classifier head forward pass (MLP)", t0,
-          f"logits → softmax: {dict(zip(['aph','ctl','dys','ua'], [f'{p:.2f}' for p in raw_probs[0]]))}")
+          f"logits → softmax: {dict(zip(short, [f'{p:.2f}' for p in raw_probs[0]]))}")
 
     t0 = _t.time()
     probs_cal = _apply_calibrators(raw_probs, model.calibrators)[0]
     _step("Isotonic calibration (per-class)", t0,
-          f"calibrated probs: {dict(zip(['aph','ctl','dys','ua'], [f'{p:.2f}' for p in probs_cal]))}")
+          f"calibrated probs: {dict(zip(short, [f'{p:.2f}' for p in probs_cal]))}")
 
     from voice_ai_v2.model import _make_prediction
     prediction = _make_prediction(probs_cal)

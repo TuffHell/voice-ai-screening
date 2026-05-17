@@ -100,10 +100,43 @@ def discover_speakers(data_dir: Path) -> list:
     return items
 
 
-def extract_embeddings(items, embedder, denoise: bool = False) -> tuple:
-    """Run preprocessing + embedding on all items. Returns (X, y, speakers)."""
+def _augment_waveform(audio: np.ndarray, rng: np.random.Generator) -> np.ndarray:
+    """
+    Light waveform augmentation for clinical robustness.
+      - random gain (±4 dB)
+      - additive Gaussian noise (SNR 25-40 dB)
+      - random small time-shift (±50 ms)
+    No pitch-shift: would distort jitter-relevant cues.
+    """
+    a = audio.copy()
+    # Gain
+    gain_db = rng.uniform(-4.0, 4.0)
+    a *= 10 ** (gain_db / 20.0)
+    # Noise
+    snr_db = rng.uniform(25.0, 40.0)
+    sig_p  = np.mean(a ** 2) + 1e-9
+    noise_p = sig_p / (10 ** (snr_db / 10.0))
+    a = a + rng.normal(0, np.sqrt(noise_p), len(a)).astype(np.float32)
+    # Time-shift
+    shift = int(rng.integers(-800, 800))
+    if shift > 0:
+        a = np.concatenate([np.zeros(shift, dtype=np.float32), a[:-shift]])
+    elif shift < 0:
+        a = np.concatenate([a[-shift:], np.zeros(-shift, dtype=np.float32)])
+    return a.clip(-1, 1).astype(np.float32)
+
+
+def extract_embeddings(items, embedder, denoise: bool = False,
+                       augment_n: int = 0, seed: int = 42) -> tuple:
+    """Run preprocessing + embedding on all items. Returns (X, y, speakers).
+
+    If `augment_n > 0`, for each clip we additionally generate `augment_n`
+    augmented versions (gain/noise/shift). All copies share the same speaker_id
+    so speaker-disjoint splits remain valid.
+    """
     X, y, spk = [], [], []
     n = len(items)
+    rng = np.random.default_rng(seed)
     for i, (path, label, speaker) in enumerate(items):
         if (i + 1) % 20 == 0 or i == n - 1:
             print(f'  {i+1:>5} / {n}  ({(i+1)/n*100:.1f}%)', end='\r', flush=True)
@@ -113,10 +146,43 @@ def extract_embeddings(items, embedder, denoise: bool = False) -> tuple:
                 continue
             emb = embedder.embed(audio)
             X.append(emb); y.append(label); spk.append(speaker)
+            for _ in range(augment_n):
+                aug = _augment_waveform(audio, rng)
+                X.append(embedder.embed(aug)); y.append(label); spk.append(speaker)
         except Exception as e:
             print(f'\n  [skip] {path}: {e}')
     print()
     return np.array(X), np.array(y), np.array(spk)
+
+
+class FocalLoss(nn.Module):
+    """Multi-class focal loss with optional per-class alpha weights.
+
+    Down-weights easy/dominant examples and concentrates training on hard,
+    minority-class samples. Standard in clinical imbalanced classification.
+    """
+    def __init__(self, alpha: torch.Tensor = None, gamma: float = 2.0,
+                 label_smoothing: float = 0.05):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.ls    = label_smoothing
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        n_cls = logits.size(-1)
+        log_probs = torch.log_softmax(logits, dim=-1)
+        probs     = log_probs.exp()
+        # one-hot with label smoothing
+        with torch.no_grad():
+            true = torch.zeros_like(log_probs).scatter_(1, targets.unsqueeze(1), 1.0)
+            if self.ls > 0:
+                true = true * (1 - self.ls) + self.ls / n_cls
+        pt = (probs * true).sum(dim=-1).clamp_min(1e-7)
+        focal = -((1 - pt) ** self.gamma) * (log_probs * true).sum(dim=-1)
+        if self.alpha is not None:
+            w = self.alpha[targets]
+            focal = focal * w
+        return focal.mean()
 
 
 # ─── Training ─────────────────────────────────────────────────────────────────
@@ -162,7 +228,8 @@ def train(
     # ── Embed everything ──────────────────────────────────────────────────
     print('\n── Extracting Wav2Vec2 embeddings ──────────────────────────────')
     embedder = SpeechEmbedder(backbone=backbone, device=device, pooling='mean_std')
-    X, y, spk = extract_embeddings(items, embedder, denoise=denoise)
+    X, y, spk = extract_embeddings(items, embedder, denoise=denoise,
+                                    augment_n=int(globals().get('AUGMENT_N', 1)))
     print(f'  Embeddings shape: {X.shape}')
 
     # ── Per-class speaker split: guarantee ≥1 speaker per class in test ───
@@ -206,7 +273,7 @@ def train(
     head = ClassifierHead(input_dim=X.shape[1], n_classes=len(LABELS)).to(device)
     optim = torch.optim.AdamW(head.parameters(), lr=lr, weight_decay=1e-4)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=epochs)
-    loss_fn = nn.CrossEntropyLoss(weight=cw, label_smoothing=0.05)
+    loss_fn = FocalLoss(alpha=cw, gamma=2.0, label_smoothing=0.05)
 
     Xtr_t = torch.tensor(X_tr_s, dtype=torch.float32, device=device)
     ytr_t = torch.tensor(y_tr,   dtype=torch.long,    device=device)
