@@ -230,8 +230,7 @@ def try_preload_whisper():
         return False
 
 # ─── Analysis function ────────────────────────────────────────────────────────
-def run_analysis(audio_bytes: bytes, filename: str = "recording.wav",
-                 use_whisper: bool = False, use_tta: bool = False):
+def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
     """Load audio bytes, run model + clinical indicators, return results dict."""
     import time as _t
     import librosa
@@ -310,10 +309,25 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav",
     except Exception as e:
         _step("Pause distribution", t0, f"unavailable ({type(e).__name__})")
 
+    # ── Adaptive decision: should we run Whisper (ASR for WPM)? ───────────
+    # Whisper adds 1-3 s of inference (after one-time download) and is the
+    # strongest single non-fluent-aphasia cue. We run it only when the clip
+    # is long enough AND shows prosodic signs of possible aphasia, OR when
+    # the recording is long enough to give ASR a reliable transcription.
+    duration_sec = len(raw) / 16000
+    aphasia_signal = (pstats['voiced_frac'] < 0.70
+                       or pstats['n_pause_500ms'] >= 2
+                       or pstats['n_pause_1s'] >= 1
+                       or (0 < indicators.speech_rate_est < 3.5))
+    voice_pathology_signal = (indicators.hnr_db > 0 and indicators.hnr_db < 12) or \
+                              (indicators.jitter_pct > 2.5) or \
+                              (indicators.shimmer_pct > 10)
+    use_whisper = duration_sec >= 4.0 and (aphasia_signal or duration_sec >= 8.0) \
+                  and not (voice_pathology_signal and duration_sec < 6.0)
+
     # ── Whisper-based words-per-minute (WPM) — non-fluent aphasia <90 WPM ──
-    # Best-effort: if Whisper fails or hasn't loaded yet, skip silently.
     t0 = _t.time()
-    wpm_res = {'words': 0, 'wpm': 0.0, 'duration_sec': len(raw)/16000, 'transcript': ''}
+    wpm_res = {'words': 0, 'wpm': 0.0, 'duration_sec': duration_sec, 'transcript': ''}
     if use_whisper:
         try:
             if try_preload_whisper():
@@ -331,25 +345,44 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav",
             _step("Whisper ASR → WPM", t0,
                   "transcription unavailable")
     else:
-        _step("Whisper ASR → WPM", t0,
-              "skipped (enable in the form for ASR-based WPM; adds ~3-30s on first use)")
+        reason = ("clip < 4s — too short for reliable ASR" if duration_sec < 4.0
+                  else "voice-quality signature dominant — dysarthria more likely than aphasia"
+                  if voice_pathology_signal and duration_sec < 6.0
+                  else "no aphasic prosodic signature — ASR unnecessary")
+        _step("Whisper ASR → WPM",  t0, f"auto-skipped: {reason}")
 
-    # Deep speech embedding. Cap input to 10 s (HuBERT on CPU scales ~linearly
-    # in audio length; 10 s is plenty for clinical screening of an utterance).
+    # Deep speech embedding — first a fast single-pass, then adaptive TTA only
+    # if the baseline classifier is unsure (max prob < 70 %).
     t0 = _t.time()
     import torch as _torch
     proc_emb = proc[:int(16000 * 10)]
-    views = [proc_emb]
-    if use_tta and len(proc_emb) > 16000:
+    emb_main = model.embedder.embed(proc_emb, sr=16000)
+    _step("Deep speech embedding (fast single pass)", t0,
+          f"{emb_main.shape[0]}-dim mean+std embedding (analysed first {len(proc_emb)/16000:.1f}s)")
+
+    # Baseline forward pass to check confidence
+    t0 = _t.time()
+    emb_s_main = model.scaler.transform(emb_main.reshape(1, -1))
+    with _torch.no_grad():
+        logits_main = model.head(_torch.tensor(emb_s_main, dtype=_torch.float32,
+                                                device=model.device)).cpu().numpy()
+    from voice_ai_v2.train import _softmax_np as _sm
+    probs_baseline = _sm(logits_main)[0]
+    baseline_conf = float(probs_baseline.max())
+
+    # Adaptive TTA: only run if baseline is uncertain
+    if baseline_conf < 0.70 and len(proc_emb) > 16000:
         rng = np.random.default_rng(0)
-        views.append((proc_emb * rng.uniform(0.85, 1.15)).astype(np.float32))
-        noise = rng.normal(0, 0.003, len(proc_emb)).astype(np.float32)
-        views.append((proc_emb + noise).clip(-1, 1).astype(np.float32))
-    emb_list = [model.embedder.embed(v, sr=16000) for v in views]
-    emb = np.mean(np.stack(emb_list, axis=0), axis=0) if len(emb_list) > 1 else emb_list[0]
-    tta_note = f"TTA × {len(views)}" if use_tta else "single pass"
-    _step(f"Deep speech embedding ({tta_note})", t0,
-          f"{emb.shape[0]}-dim mean+std embedding (analysed first {len(proc_emb)/16000:.1f}s)")
+        v1 = (proc_emb * rng.uniform(0.85, 1.15)).astype(np.float32)
+        v2 = (proc_emb + rng.normal(0, 0.003, len(proc_emb)).astype(np.float32)).clip(-1, 1).astype(np.float32)
+        emb = np.mean(np.stack([emb_main, model.embedder.embed(v1, 16000),
+                                model.embedder.embed(v2, 16000)], axis=0), axis=0)
+        _step("Adaptive TTA triggered", t0,
+              f"baseline confidence only {baseline_conf:.0%} — averaging over 3 perturbed views for stability")
+    else:
+        emb = emb_main
+        _step("Adaptive TTA decision", t0,
+              f"baseline confident ({baseline_conf:.0%}) — TTA skipped to save time")
 
     t0 = _t.time()
     emb_s = model.scaler.transform(emb.reshape(1, -1))
@@ -1131,26 +1164,15 @@ def main():
         if audio_bytes:
             st.markdown("")
             patient_display = st.session_state.patient_id or "Anonymous"
-            col_opts1, col_opts2 = st.columns(2)
-            with col_opts1:
-                use_whisper = st.checkbox(
-                    "Use speech recognition (recommended for aphasia)",
-                    value=True,
-                    help="Words-per-minute is the strongest single aphasia cue. "
-                         "Adds 3–30 s on the first analysis (one-time download).",
-                )
-            with col_opts2:
-                use_tta = st.checkbox(
-                    "Test-time augmentation",
-                    value=False,
-                    help="Average over 3 perturbed views for stability. ~3× embedding time.",
-                )
+            st.caption(
+                "The model adaptively decides whether to run speech recognition "
+                "and test-time augmentation based on the recording — full reasoning "
+                "trace shown below the result."
+            )
             if st.button("Analyse", type="primary", use_container_width=False):
                 with st.spinner("Preprocessing audio and running analysis..."):
                     try:
-                        result = run_analysis(audio_bytes, audio_name,
-                                              use_whisper=use_whisper,
-                                              use_tta=use_tta)
+                        result = run_analysis(audio_bytes, audio_name)
                         st.session_state.last_result = result
                         st.session_state.history.append({
                             "timestamp": result["timestamp"],
