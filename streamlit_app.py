@@ -230,7 +230,8 @@ def try_preload_whisper():
         return False
 
 # ─── Analysis function ────────────────────────────────────────────────────────
-def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
+def run_analysis(audio_bytes: bytes, filename: str = "recording.wav",
+                 use_whisper: bool = False, use_tta: bool = False):
     """Load audio bytes, run model + clinical indicators, return results dict."""
     import time as _t
     import librosa
@@ -273,22 +274,27 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
     finally:
         os.unlink(tmp_path)
 
+    # Cap raw audio length used for the heavy Praat/HuBERT passes. Real-world
+    # screening clips rarely benefit from > 15 s.
+    raw_for_features = raw[:int(16000 * 15)]
+
+    # ── Praat indicators (single combined call → jit, shim, HNR, CPP) ──────
     t0 = _t.time()
-    indicators = extract_clinical_indicators(raw)
-    _step("Extract acoustic indicators (Praat on raw audio)", t0,
+    indicators = extract_clinical_indicators(raw_for_features)
+    _step("Acoustic indicators (jitter, shimmer, HNR, F0)", t0,
           f"jitter={indicators.jitter_pct:.2f}%, shimmer={indicators.shimmer_pct:.2f}%, "
           f"HNR={indicators.hnr_db:.1f} dB, F0={indicators.f0_mean_hz:.0f} Hz")
 
-    # ── Additional clinical features: pause distribution + CPP + articulation
+    # ── Pause distribution + CPP ──────────────────────────────────────────
     t0 = _t.time()
     pstats = {'voiced_frac': 0.5, 'n_pause_500ms': 0, 'n_pause_1s': 0, 'articulation_rate': 0.0}
     cpp_db = 0.0
     try:
         from voice_ai.features import _pause_stats, _praat_indicators as _praat
-        pstats = _pause_stats(raw, 16000)
-        cpp_res = _praat(raw, 16000)
+        pstats = _pause_stats(raw_for_features, 16000)
+        cpp_res = _praat(raw_for_features, 16000)
         cpp_db  = cpp_res[3] if cpp_res and len(cpp_res) > 3 and cpp_res[3] is not None else 0.0
-        _step("Pause distribution + CPP (clinical fluency features)", t0,
+        _step("Pause distribution + CPP", t0,
               f"voiced={pstats['voiced_frac']:.0%}, "
               f"long pauses (≥500ms)={pstats['n_pause_500ms']}, "
               f"(≥1s)={pstats['n_pause_1s']}, "
@@ -301,37 +307,42 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
     # Best-effort: if Whisper fails or hasn't loaded yet, skip silently.
     t0 = _t.time()
     wpm_res = {'words': 0, 'wpm': 0.0, 'duration_sec': len(raw)/16000, 'transcript': ''}
-    try:
-        if try_preload_whisper():
-            from voice_ai.features import whisper_word_count
-            wpm_res = whisper_word_count(raw, 16000)
-    except Exception:
-        pass
-    if wpm_res['wpm'] > 0:
-        snippet = wpm_res['transcript'][:80] + ('…' if len(wpm_res['transcript']) > 80 else '')
-        _step("Whisper ASR → WPM (clinical fluency)", t0,
-              f"transcribed {wpm_res['words']} words in {wpm_res['duration_sec']:.1f}s "
-              f"= {wpm_res['wpm']:.0f} WPM (control ≈150-180, non-fluent aphasia <90). "
-              f"Heard: \"{snippet}\"")
+    if use_whisper:
+        try:
+            if try_preload_whisper():
+                from voice_ai.features import whisper_word_count
+                wpm_res = whisper_word_count(raw, 16000)
+        except Exception:
+            pass
+        if wpm_res['wpm'] > 0:
+            snippet = wpm_res['transcript'][:80] + ('…' if len(wpm_res['transcript']) > 80 else '')
+            _step("Whisper ASR → WPM (clinical fluency)", t0,
+                  f"transcribed {wpm_res['words']} words in {wpm_res['duration_sec']:.1f}s "
+                  f"= {wpm_res['wpm']:.0f} WPM (control ≈150-180, non-fluent aphasia <90). "
+                  f"Heard: \"{snippet}\"")
+        else:
+            _step("Whisper ASR → WPM", t0,
+                  "transcription unavailable")
     else:
         _step("Whisper ASR → WPM", t0,
-              "transcription unavailable (model not loaded or clip too short)")
+              "skipped (enable in the form for ASR-based WPM; adds ~3-30s on first use)")
 
-    # Test-time augmentation: average embeddings over 3 mild perturbations of
-    # the preprocessed audio for stability against mic/room variation.
+    # Deep speech embedding. Cap input to 10 s (HuBERT on CPU scales ~linearly
+    # in audio length; 10 s is plenty for clinical screening of an utterance).
     t0 = _t.time()
     import torch as _torch
-    rng = np.random.default_rng(0)
-    views = [proc]
-    if len(proc) > 16000:
-        views.append((proc * rng.uniform(0.85, 1.15)).astype(np.float32))      # gain jitter
-        noise = rng.normal(0, 0.003, len(proc)).astype(np.float32)
-        views.append((proc + noise).clip(-1, 1).astype(np.float32))             # tiny noise
+    proc_emb = proc[:int(16000 * 10)]
+    views = [proc_emb]
+    if use_tta and len(proc_emb) > 16000:
+        rng = np.random.default_rng(0)
+        views.append((proc_emb * rng.uniform(0.85, 1.15)).astype(np.float32))
+        noise = rng.normal(0, 0.003, len(proc_emb)).astype(np.float32)
+        views.append((proc_emb + noise).clip(-1, 1).astype(np.float32))
     emb_list = [model.embedder.embed(v, sr=16000) for v in views]
-    emb = np.mean(np.stack(emb_list, axis=0), axis=0)
-    _step("Wav2Vec2 embedding (TTA × " + str(len(views)) + ")", t0,
-          f"{emb.shape[0]}-dim mean+std embedding; averaged over {len(views)} "
-          f"augmented views for stability")
+    emb = np.mean(np.stack(emb_list, axis=0), axis=0) if len(emb_list) > 1 else emb_list[0]
+    tta_note = f"TTA × {len(views)}" if use_tta else "single pass"
+    _step(f"Deep speech embedding ({tta_note})", t0,
+          f"{emb.shape[0]}-dim mean+std embedding (analysed first {len(proc_emb)/16000:.1f}s)")
 
     t0 = _t.time()
     emb_s = model.scaler.transform(emb.reshape(1, -1))
@@ -1076,10 +1087,25 @@ def main():
         if audio_bytes:
             st.markdown("")
             patient_display = st.session_state.patient_id or "Anonymous"
+            col_opts1, col_opts2 = st.columns(2)
+            with col_opts1:
+                use_whisper = st.checkbox(
+                    "Use ASR for words-per-minute",
+                    value=False,
+                    help="Slower (~3–30 s extra on first run). Strongest single fluency cue.",
+                )
+            with col_opts2:
+                use_tta = st.checkbox(
+                    "Test-time augmentation",
+                    value=False,
+                    help="Average over 3 perturbed views for stability. ~3× embedding time.",
+                )
             if st.button("Analyse", type="primary", use_container_width=False):
                 with st.spinner("Preprocessing audio and running analysis..."):
                     try:
-                        result = run_analysis(audio_bytes, audio_name)
+                        result = run_analysis(audio_bytes, audio_name,
+                                              use_whisper=use_whisper,
+                                              use_tta=use_tta)
                         st.session_state.last_result = result
                         st.session_state.history.append({
                             "timestamp": result["timestamp"],
