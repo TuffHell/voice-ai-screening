@@ -39,12 +39,20 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-html, body, [class*="css"] {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-}
+html, body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; color: #0f172a; }
 
 /* App background */
-.stApp { background: linear-gradient(180deg, #f0f6ff 0%, #e0eaff 100%); }
+.stApp { background: linear-gradient(180deg, #f0f6ff 0%, #e0eaff 100%); color: #0f172a; }
+
+/* Force readable text everywhere in the main area */
+.stApp .main, .stApp .main * { color: #0f172a; }
+.stApp .main h1, .stApp .main h2, .stApp .main h3, .stApp .main h4, .stApp .main h5 { color: #1e3a8a !important; }
+.stApp .main label, .stApp .main p, .stApp .main span, .stApp .main div { color: #0f172a; }
+.stApp .main .stRadio label, .stApp .main .stCheckbox label,
+.stApp .main .stSelectbox label, .stApp .main .stTextInput label,
+.stApp .main .stFileUploader label { color: #1e3a8a !important; font-weight: 500; }
+.stApp .main .stMarkdown { color: #0f172a; }
+.stApp .main code { background: #dbeafe; color: #1e3a8a; padding: 0.1em 0.4em; border-radius: 4px; }
 
 /* Sidebar — deep navy */
 section[data-testid="stSidebar"] {
@@ -163,9 +171,13 @@ def load_model():
 # ─── Analysis function ────────────────────────────────────────────────────────
 def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
     """Load audio bytes, run model + clinical indicators, return results dict."""
-    import soundfile as sf
+    import time as _t
     import librosa
     from voice_ai.features import extract_clinical_indicators
+
+    trace = []
+    def _step(name: str, t0: float, detail: str = ""):
+        trace.append({"step": name, "ms": (_t.time() - t0) * 1000, "detail": detail})
 
     model = load_model()
 
@@ -175,22 +187,54 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
         tmp_path = f.name
 
     try:
-        # Raw audio (16 kHz mono, no noise reduction) — required for valid
-        # clinical jitter/shimmer/HNR via Praat.
+        t0 = _t.time()
         raw, _ = librosa.load(tmp_path, sr=16000, mono=True)
         raw = raw.astype(np.float32)
+        _step("Load & resample audio", t0,
+              f"loaded {len(raw)/16000:.2f}s @ 16 kHz mono ({len(raw):,} samples)")
     finally:
         os.unlink(tmp_path)
 
+    t0 = _t.time()
     indicators = extract_clinical_indicators(raw)
+    _step("Extract acoustic indicators (Praat)", t0,
+          f"jitter={indicators.jitter_pct:.2f}%, shimmer={indicators.shimmer_pct:.2f}%, "
+          f"HNR={indicators.hnr_db:.1f} dB, F0={indicators.f0_mean_hz:.0f} Hz")
 
-    # Model prediction uses the v2 pipeline (its own preprocessing/VAD)
+    t0 = _t.time()
     model.clear_session()
-    prediction = model.predict_audio(raw)
-    audio = raw
+    emb = model.embedder.embed(raw, sr=16000)
+    _step("Wav2Vec2 embedding (frozen backbone)", t0,
+          f"{emb.shape[0]}-dim mean+std pooled embedding from facebook/wav2vec2-base-960h")
 
-    # Waveform data (downsample to 500 pts for display)
+    t0 = _t.time()
+    emb_s = model.scaler.transform(emb.reshape(1, -1))
+    _step("Standardize features (StandardScaler)", t0,
+          f"z-scored {emb_s.shape[1]} features against training distribution")
+
+    import torch as _torch
+    t0 = _t.time()
+    with _torch.no_grad():
+        logits = model.head(_torch.tensor(emb_s, dtype=_torch.float32,
+                                          device=model.device)).cpu().numpy()
+    from voice_ai_v2.train import _softmax_np, _apply_calibrators
+    raw_probs = _softmax_np(logits)
+    _step("Classifier head forward pass (MLP)", t0,
+          f"logits → softmax: {dict(zip(['aph','ctl','dys','ua'], [f'{p:.2f}' for p in raw_probs[0]]))}")
+
+    t0 = _t.time()
+    probs_cal = _apply_calibrators(raw_probs, model.calibrators)[0]
+    _step("Isotonic calibration (per-class)", t0,
+          f"calibrated probs: {dict(zip(['aph','ctl','dys','ua'], [f'{p:.2f}' for p in probs_cal]))}")
+
+    from voice_ai_v2.model import _make_prediction
+    prediction = _make_prediction(probs_cal)
+    trace.append({"step": "Final decision", "ms": 0.0,
+                  "detail": f"argmax → {prediction.label} ({prediction.confidence:.1%}, "
+                            f"{prediction.confidence_level} confidence)"})
+
     sr = 16000
+    audio = raw
     step  = max(1, len(audio) // 500)
     times = np.arange(0, len(audio), step) / sr
     wave  = audio[::step]
@@ -204,6 +248,7 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
         "timestamp":   datetime.datetime.now(),
         "filename":    filename,
         "patient_id":  st.session_state.patient_id or "Anonymous",
+        "trace":       trace,
     }
 
 # ─── Chart builders ───────────────────────────────────────────────────────────
@@ -356,6 +401,28 @@ def render_results(result: dict):
     </div>
     """, unsafe_allow_html=True)
     st.markdown("")
+
+    # ── AI thinking process trace ──────────────────────────────────────────
+    if result.get("trace"):
+        with st.expander("AI Reasoning Trace — step-by-step analysis", expanded=True):
+            st.markdown(
+                "<div style='font-size:0.85rem; color:#1e3a8a; margin-bottom:0.4rem;'>"
+                "Each step below shows what the model actually computed, in order, "
+                "with timing and intermediate values.</div>",
+                unsafe_allow_html=True,
+            )
+            for i, s in enumerate(result["trace"], 1):
+                ms_txt = f"{s['ms']:.0f} ms" if s["ms"] > 0 else "—"
+                st.markdown(
+                    f"<div style='border-left:3px solid #2563eb; padding:0.4rem 0.8rem; "
+                    f"margin-bottom:0.4rem; background:#ffffff; border-radius:6px;'>"
+                    f"<div style='display:flex; justify-content:space-between;'>"
+                    f"<strong style='color:#1e3a8a;'>{i}. {s['step']}</strong>"
+                    f"<span style='color:#64748b; font-size:0.8rem;'>{ms_txt}</span></div>"
+                    f"<div style='color:#475569; font-size:0.85rem; margin-top:0.2rem;'>"
+                    f"{s['detail']}</div></div>",
+                    unsafe_allow_html=True,
+                )
 
     # ── Probability + Waveform ─────────────────────────────────────────────
     col_prob, col_wave = st.columns([1, 1])
