@@ -5,6 +5,7 @@ TORGO_raw/
 UASpeech_hf/
 UASpeech_hf2/
 gdrive_dl/
+APROCSA_raw/
 
 # Python
 __pycache__/
