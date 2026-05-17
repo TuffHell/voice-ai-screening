@@ -251,8 +251,15 @@ def run_analysis(audio_bytes: bytes, filename: str = "recording.wav"):
         # audio as the closest pathological class. This step is critical.
         t0 = _t.time()
         proc = v2_preprocess(tmp_path, apply_vad=True, apply_denoise=False)
+        # If VAD stripped almost everything (e.g. very quiet recording), fall
+        # back to bandpass-only audio so the embedder sees something speech-like.
+        if len(proc) < 16000 * 0.5:
+            proc = v2_preprocess(tmp_path, apply_vad=False, apply_denoise=False)
+            vad_note = "VAD found <0.5s speech — fell back to bandpass-only audio"
+        else:
+            vad_note = f"{len(proc)/16000:.2f}s kept after VAD"
         _step("Match-train preprocessing (bandpass + loudness + VAD)", t0,
-              f"{len(proc)/16000:.2f}s after VAD; -23 LUFS normalised; 80-8000 Hz bandpass")
+              f"{vad_note}; −23 LUFS normalised; 80–8000 Hz bandpass")
     finally:
         os.unlink(tmp_path)
 

@@ -8,22 +8,22 @@
     "dysarthria"
   ],
   "n_classes": 3,
-  "total_samples": 1392,
-  "n_speakers": 46,
+  "total_samples": 2648,
+  "n_speakers": 78,
   "class_counts": {
     "aphasia": 197,
-    "control": 4095,
-    "dysarthria": 2768
+    "control": 4665,
+    "dysarthria": 3118
   },
   "class_weights": {
-    "aphasia": 1.289537712895377,
-    "control": 1.424731182795699,
-    "dysarthria": 0.6567534076827757
+    "aphasia": 2.3434343434343434,
+    "control": 0.6364883401920439,
+    "dysarthria": 0.9978494623655914
   },
   "speaker_disjoint_splits": true,
   "isotonic_calibration": true,
-  "test_accuracy": 0.7358490566037735,
-  "test_ece": 0.11185713534085254,
+  "test_accuracy": 0.9621212121212122,
+  "test_ece": 0.031338232992724945,
   "improvements_over_v1": [
     "Wav2Vec2 embeddings (768-dim contextual) replace 32 MFCC features",
     "Speaker-disjoint train/test split \u2014 no within-speaker leakage",

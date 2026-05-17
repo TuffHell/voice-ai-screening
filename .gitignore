@@ -6,6 +6,13 @@ UASpeech_hf/
 UASpeech_hf2/
 gdrive_dl/
 APROCSA_raw/
+UASpeech_low/
+LibriTTS_dev/
+Kaggle_dysctl/
+
+# Kaggle credentials (never commit)
+.kaggle/
+kaggle.json
 
 # Python
 __pycache__/
