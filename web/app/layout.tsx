@@ -1,6 +1,8 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import AmbientBackground from "@/components/AmbientBackground";
+import CursorBubbles    from "@/components/CursorBubbles";
 
 export const metadata: Metadata = {
   title: "Voice AI — Clinical Speech Screening",
@@ -11,7 +13,11 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <AmbientBackground />
+        <CursorBubbles />
+        {children}
+      </body>
     </html>
   );
 }

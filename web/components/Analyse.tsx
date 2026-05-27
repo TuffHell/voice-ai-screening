@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Mic, Upload, Square, RotateCcw, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { analyseAudio, type AnalysisResponse } from "@/lib/api";
+import { pushHistory } from "@/lib/history";
 
 type Status = "idle" | "recording" | "analysing" | "done" | "error";
 
@@ -83,6 +84,7 @@ export default function Analyse() {
     try {
       const r = await analyseAudio(audioBlob);
       setResult(r);
+      pushHistory(r);
       setStatus("done");
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Analysis failed");
