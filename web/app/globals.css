@@ -7,24 +7,20 @@
 @layer base {
   html { scroll-behavior: smooth; }
   body {
-    @apply font-sans text-ice-50 bg-ink-900 antialiased;
-    background:
-      radial-gradient(1200px 800px at 12% 10%, rgba(74,130,255,0.18), transparent 60%),
-      radial-gradient(1000px 700px at 88% 90%, rgba(46,99,235,0.14), transparent 55%),
-      radial-gradient(900px 700px at 60% 40%, rgba(212,175,106,0.08), transparent 50%),
-      linear-gradient(180deg, #050810 0%, #080d18 60%, #0c1322 100%);
-    background-size: 200% 200%, 200% 200%, 200% 200%, 100% 100%;
-    background-attachment: fixed;
-    animation: aurora-pan 30s ease-in-out infinite alternate;
+    @apply font-sans text-ice-50 antialiased;
+    /* Static dark base — all the motion is now done on the canvas behind. */
+    background: linear-gradient(180deg, #050810 0%, #080d18 60%, #0c1322 100%);
     letter-spacing: -0.005em;
+    min-height: 100vh;
   }
+  /* Static grain (no mix-blend-mode — that was forcing a full-page repaint). */
   body::after {
-    /* Soft grain overlay for texture */
     content: "";
     position: fixed; inset: 0;
-    background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.9  0 0 0 0 0.92  0 0 0 0 1  0 0 0 0.04 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-    opacity: 0.5; mix-blend-mode: overlay;
-    pointer-events: none; z-index: 1;
+    background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.9  0 0 0 0 0.92  0 0 0 0 1  0 0 0 0.035 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    opacity: 0.55;
+    pointer-events: none;
+    z-index: 2;
   }
   ::selection { background: rgba(74,130,255,0.35); color: white; }
 }
