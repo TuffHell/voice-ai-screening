@@ -40,11 +40,18 @@ from voice_ai_v2.preprocessing import preprocess as v2_preprocess
 from voice_ai_v2.train import _softmax_np, _apply_calibrators
 
 
-# ── App + CORS (allow our future Vercel frontend) ──────────────────────────
+# ── App + CORS ────────────────────────────────────────────────────────────
+# Only the live Vercel deployment, its preview branches, and local dev are
+# allowed to call the API. Stops random sites from hot-linking the backend.
 app = FastAPI(title="Voice AI", version="2.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],          # Will tighten to Vercel domain once deployed.
+    allow_origins=[
+        "https://voice-ai-screening.vercel.app",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_origin_regex=r"https://voice-ai-screening-[\w\-]+\.vercel\.app",
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
