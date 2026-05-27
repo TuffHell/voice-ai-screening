@@ -86,38 +86,23 @@ html, body {
     letter-spacing: -0.005em;
 }
 
-/* ── Aurora-mesh animated background ──────────────────────────────────── */
+/* ── Aurora-mesh background (applied directly, no pseudo-elements that
+ *    could intercept Streamlit's stacking context) ─────────────────────── */
 .stApp {
     background:
       radial-gradient(1200px 800px at 12% 10%, rgba(74,130,255,0.18), transparent 60%),
       radial-gradient(1000px 700px at 88% 90%, rgba(46,99,235,0.14), transparent 55%),
       radial-gradient(900px 700px at 60% 40%, rgba(212,175,106,0.08), transparent 50%),
       linear-gradient(180deg, var(--ink-900) 0%, var(--ink-800) 60%, var(--ink-700) 100%);
+    background-attachment: fixed;
+    background-size: 200% 200%, 200% 200%, 200% 200%, 100% 100%;
     color: var(--text-1);
-    position: relative;
-    overflow-x: hidden;
-}
-.stApp::before {
-    content: ""; position: fixed; inset: -25%;
-    background:
-      radial-gradient(600px 500px at var(--mx, 30%) var(--my, 30%), rgba(108,158,255,0.10), transparent 60%),
-      radial-gradient(800px 600px at calc(100% - var(--mx, 70%)) calc(100% - var(--my, 70%)), rgba(212,175,106,0.06), transparent 60%);
-    animation: aurora-pan 28s var(--ease-soft) infinite alternate;
-    pointer-events: none; z-index: 0;
-}
-.stApp::after {
-    content: ""; position: fixed; inset: 0;
-    background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.9  0 0 0 0 0.92  0 0 0 0 1  0 0 0 0.045 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-    opacity: 0.55; mix-blend-mode: overlay;
-    pointer-events: none; z-index: 0;
+    animation: aurora-pan 30s ease-in-out infinite alternate;
 }
 @keyframes aurora-pan {
-    0%   { transform: translate3d(-2%, -1%, 0) rotate(0deg);   opacity: 0.85; }
-    50%  { transform: translate3d(2%, 1.5%, 0) rotate(0.4deg); opacity: 1; }
-    100% { transform: translate3d(-1%, 2%, 0) rotate(-0.3deg); opacity: 0.9; }
-}
-.main, .main .block-container, section[data-testid="stSidebar"] {
-    position: relative; z-index: 1;
+    0%   { background-position: 0% 0%,   100% 100%, 50% 50%, 0 0; }
+    50%  { background-position: 12% 8%,  88% 92%,   58% 42%, 0 0; }
+    100% { background-position: 4% 14%,  96% 86%,   45% 55%, 0 0; }
 }
 
 /* ── Main column rhythm ───────────────────────────────────────────────── */
@@ -480,8 +465,10 @@ section[data-testid="stSidebar"] .stMarkdown h3 {
     line-height: 1.55; margin: 0;
 }
 
-/* Hide Streamlit chrome */
-#MainMenu, footer, [data-testid="stHeader"] { visibility: hidden; height: 0 !important; }
+/* Hide Streamlit menu + footer only (do NOT touch stHeader or stToolbar —
+ * collapsing them broke the layout's stacking context on Cloud) */
+#MainMenu, footer { visibility: hidden; }
+[data-testid="stHeader"] { background: transparent; }
 
 /* Scrollbar — restrained */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
