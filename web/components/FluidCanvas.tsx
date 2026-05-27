@@ -51,14 +51,14 @@ export default function FluidCanvas() {
           dyeResolution: 1024,
           captureResolution: 512,
 
-          // Slightly lower dissipation so trails linger like aurora curtains
+          // Trails linger like aurora curtains, but pointer pushes are gentle.
           densityDissipation:  1.25,
           velocityDissipation: 0.4,
           pressure: 0.82,
           pressureIterations: 18,
-          curl: 32,                    // a touch more vorticity for that auroral curl
-          splatRadius: 0.24,
-          splatForce: 7800,
+          curl: 30,                    // vorticity — that auroral curl
+          splatRadius: 0.18,           // smaller splash per stroke
+          splatForce: 5500,            // gentler push
           shading: true,
 
           colorful: false,
@@ -102,19 +102,24 @@ export default function FluidCanvas() {
           return palette[paletteIdx];
         };
 
+        // Velocity scaling — keeps the splat soft and graceful (was 5 which
+        // produced the "exploding" look the user reported).
+        const VEL_SCALE = 1.6;
+        // Clamp per-frame velocity so a very fast flick doesn't fire a giant splat
+        const MAX_VEL = 35;
+        const clamp = (v: number): number => Math.max(-MAX_VEL, Math.min(MAX_VEL, v));
+
         const onMove = (e: PointerEvent) => {
           const x = e.clientX;
           const y = e.clientY;
           if (hasLast) {
-            const dx = (x - lastX) * 5;
-            const dy = (y - lastY) * 5;
-            // Only splat if there's actual motion (avoids flooding when
-            // synthetic pointermove events fire while the user is still)
+            const dx = clamp((x - lastX) * VEL_SCALE);
+            const dy = clamp((y - lastY) * VEL_SCALE);
             if (dx !== 0 || dy !== 0) {
               try {
                 sim.splatAtLocation(x, y, dx, dy, pickColor());
               } catch {
-                /* ignore one-off splat errors */
+                /* one-off splat errors are harmless */
               }
             }
           }
@@ -126,8 +131,8 @@ export default function FluidCanvas() {
           if (!t) return;
           const x = t.clientX, y = t.clientY;
           if (hasLast) {
-            const dx = (x - lastX) * 5;
-            const dy = (y - lastY) * 5;
+            const dx = clamp((x - lastX) * VEL_SCALE);
+            const dy = clamp((y - lastY) * VEL_SCALE);
             if (dx !== 0 || dy !== 0) {
               try { sim.splatAtLocation(x, y, dx, dy, pickColor()); } catch {}
             }

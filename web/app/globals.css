@@ -18,12 +18,14 @@
 }
 
 @layer components {
+  /* Cards intentionally translucent so the fluid background flows through.
+     backdrop-blur keeps text legible against any local fluid colour. */
   .glass {
-    @apply bg-gradient-to-b from-ink-500/55 to-ink-700/70 backdrop-blur-xl
+    @apply bg-gradient-to-b from-ink-700/30 to-ink-900/50 backdrop-blur-xl
            border border-white/10 rounded-2xl;
   }
   .glass-strong {
-    @apply bg-gradient-to-b from-ink-500/70 to-ink-700/85 backdrop-blur-2xl
+    @apply bg-gradient-to-b from-ink-700/45 to-ink-900/65 backdrop-blur-2xl
            border border-white/10 rounded-3xl shadow-[0_20px_60px_-20px_rgba(2,8,23,0.7)];
   }
   .eyebrow {
