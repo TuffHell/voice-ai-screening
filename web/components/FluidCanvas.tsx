@@ -1,21 +1,14 @@
 "use client";
 /**
- * GPU fluid simulation background — the same technique used on unseen.co.
+ * GPU fluid simulation background — Pavel Dobryakov's Navier-Stokes solver
+ * via webgl-fluid-enhanced, with two important customisations:
  *
- * This is Pavel Dobryakov's WebGL Navier-Stokes fluid solver (MIT) running
- * 8 framebuffer passes per frame entirely as fragment shaders:
- *
- *     advection → divergence → pressure (Jacobi × N) → gradient subtract →
- *     vorticity confinement → splat (pointer force) → display → bloom
- *
- * The pointer pushes velocity AND colour into the field, so cursor motion
- * isn't *followed* by something visual — the cursor IS the visual. Move
- * fast and you get a splash; move slow and you get a gentle ripple. The
- * simulation runs on the GPU at native refresh rate, no JS loop bottleneck.
- *
- * Tuned for a clinical aesthetic: cold-blue + soft-gold palette, deep ink
- * background, moderate dissipation (motion lingers but doesn't dominate),
- * bloom on for the cinematic finish.
+ *   1.  Aurora-inspired palette (emerald + deep blue + violet + gold) —
+ *       reads as "flowing nature" instead of clinical loop.
+ *   2.  Pointer events are listened at the WINDOW level and forwarded as
+ *       manual splats. This makes the cursor effect work everywhere on
+ *       the page, not just over the canvas — UI cards on top no longer
+ *       absorb the events.
  */
 import { useEffect, useRef } from "react";
 
@@ -26,77 +19,130 @@ export default function FluidCanvas() {
     if (typeof window === "undefined") return;
     if (!containerRef.current) return;
 
-    // Dynamic import to keep the simulation code out of the main bundle until
-    // the page has rendered — the dependency is ~30 KB of WebGL + GLSL.
     let cleanup: (() => void) | undefined;
 
     (async () => {
       try {
         const mod = await import("webgl-fluid-enhanced");
-        const WebGLFluidEnhanced = mod.default ?? (mod as unknown as { WebGLFluidEnhanced: typeof mod.default }).WebGLFluidEnhanced;
+        const WebGLFluidEnhanced =
+          mod.default ??
+          (mod as unknown as { WebGLFluidEnhanced: typeof mod.default }).WebGLFluidEnhanced;
         if (!containerRef.current) return;
         if (!WebGLFluidEnhanced) {
           console.error("[FluidCanvas] webgl-fluid-enhanced has no default export", mod);
           return;
         }
+
         const sim = new WebGLFluidEnhanced(containerRef.current);
 
-      sim.setConfig({
-        // Resolution / quality
-        simResolution: 160,            // velocity field — keep moderate
-        dyeResolution: 1024,           // dye field — higher = crisper colour
-        captureResolution: 512,
+        // Aurora / deep-ocean palette — flowing nature colours
+        const palette = [
+          "#10b981",   // emerald
+          "#34d399",   // mint
+          "#22d3ee",   // cyan
+          "#3b82f6",   // azure
+          "#8b5cf6",   // violet
+          "#ec4899",   // soft magenta (rare, peeks through)
+          "#f0d9a6",   // dawn gold (rare)
+        ];
 
-        // Fluid behaviour
-        densityDissipation:  1.6,      // how fast colour fades
-        velocityDissipation: 0.55,     // how fast motion fades (lower = more flow)
-        pressure: 0.78,
-        pressureIterations: 18,
-        curl: 26,                      // vorticity confinement strength
-        splatRadius: 0.22,             // size of cursor push
-        splatForce: 7200,              // strength of cursor push
-        shading: true,                 // soft normal-based shading
+        sim.setConfig({
+          simResolution: 160,
+          dyeResolution: 1024,
+          captureResolution: 512,
 
-        // Colour
-        colorful: false,
-        colorPalette: [
-          "#4a82ff",   // ice blue
-          "#2e63eb",   // primary blue
-          "#1e4ac9",   // deep blue
-          "#8fbaff",   // soft sky
-          "#d4af6a",   // warm gold
-          "#f0d9a6",   // light gold
-        ],
-        colorUpdateSpeed: 6,
-        backgroundColor: "#040711",    // deep ink
-        transparent: false,
-        brightness: 0.6,
-        inverted: false,
+          // Slightly lower dissipation so trails linger like aurora curtains
+          densityDissipation:  1.25,
+          velocityDissipation: 0.4,
+          pressure: 0.82,
+          pressureIterations: 18,
+          curl: 32,                    // a touch more vorticity for that auroral curl
+          splatRadius: 0.24,
+          splatForce: 7800,
+          shading: true,
 
-        // Bloom — the cinematic finish
-        bloom: true,
-        bloomIterations: 8,
-        bloomResolution: 256,
-        bloomIntensity: 0.55,
-        bloomThreshold: 0.55,
-        bloomSoftKnee: 0.7,
+          colorful: false,
+          colorPalette: palette,
+          colorUpdateSpeed: 5,
+          backgroundColor: "#02050d",  // near-black with a hint of deep blue
+          transparent: false,
+          brightness: 0.65,
+          inverted: false,
 
-        // No volumetric sunrays — they wash out the clinical palette
-        sunrays: false,
-        sunraysResolution: 196,
-        sunraysWeight: 0.5,
+          bloom: true,
+          bloomIterations: 8,
+          bloomResolution: 256,
+          bloomIntensity: 0.62,
+          bloomThreshold: 0.5,
+          bloomSoftKnee: 0.7,
 
-        // Light hover-only splats so the field has subtle life even when idle
-        hover: true,
-      });
+          sunrays: false,
+          sunraysResolution: 196,
+          sunraysWeight: 0.5,
+
+          // Disable hover-only mode — we feed pointer events manually
+          hover: false,
+        });
 
         sim.start();
+        sim.multipleSplats(9);   // seed the field with initial colour
 
-        // Seed with a few gentle splats on first load so there's already a
-        // softly-glowing field when the visitor lands.
-        sim.multipleSplats(7);
+        // ─── Window-level pointer handler ─────────────────────────────────
+        // The library's internal pointer listener only fires on its own
+        // container. UI cards above (z-index 10) intercept events first, so
+        // the cursor would only push fluid in the empty edges. By listening
+        // on `window` and calling `splatAtLocation` manually, the cursor
+        // pushes velocity everywhere on the page — including over content.
+        let lastX = 0, lastY = 0, hasLast = false;
+        let paletteIdx = 0;
 
-        cleanup = () => sim.stop();
+        const pickColor = (): string => {
+          // Cycle through the palette so different gestures get different tints
+          paletteIdx = (paletteIdx + 1) % palette.length;
+          return palette[paletteIdx];
+        };
+
+        const onMove = (e: PointerEvent) => {
+          const x = e.clientX;
+          const y = e.clientY;
+          if (hasLast) {
+            const dx = (x - lastX) * 5;
+            const dy = (y - lastY) * 5;
+            // Only splat if there's actual motion (avoids flooding when
+            // synthetic pointermove events fire while the user is still)
+            if (dx !== 0 || dy !== 0) {
+              try {
+                sim.splatAtLocation(x, y, dx, dy, pickColor());
+              } catch {
+                /* ignore one-off splat errors */
+              }
+            }
+          }
+          lastX = x; lastY = y; hasLast = true;
+        };
+
+        const onTouch = (e: TouchEvent) => {
+          const t = e.touches[0];
+          if (!t) return;
+          const x = t.clientX, y = t.clientY;
+          if (hasLast) {
+            const dx = (x - lastX) * 5;
+            const dy = (y - lastY) * 5;
+            if (dx !== 0 || dy !== 0) {
+              try { sim.splatAtLocation(x, y, dx, dy, pickColor()); } catch {}
+            }
+          }
+          lastX = x; lastY = y; hasLast = true;
+        };
+
+        window.addEventListener("pointermove", onMove, { passive: true });
+        window.addEventListener("touchmove",   onTouch, { passive: true });
+
+        cleanup = () => {
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("touchmove",   onTouch);
+          sim.stop();
+        };
       } catch (err) {
         console.error("[FluidCanvas] failed to initialise:", err);
       }
@@ -109,11 +155,11 @@ export default function FluidCanvas() {
     <div
       ref={containerRef}
       aria-hidden
-      className="fixed inset-0"
+      className="fixed inset-0 pointer-events-none"
       style={{
         width: "100vw",
         height: "100vh",
-        zIndex: 0,           // behind content (z-10) but above html background
+        zIndex: 0,
       }}
     />
   );
