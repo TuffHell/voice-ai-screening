@@ -1,7 +1,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import CinematicScene from "@/components/CinematicScene";
+import FluidCanvas from "@/components/FluidCanvas";
 
 export const metadata: Metadata = {
   title: "Voice AI — Clinical Speech Screening",
@@ -13,7 +13,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <CinematicScene />
+        <FluidCanvas />
         {children}
       </body>
     </html>
