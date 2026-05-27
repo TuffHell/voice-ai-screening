@@ -1,14 +1,16 @@
 "use client";
 /**
- * GPU fluid simulation background — Pavel Dobryakov's Navier-Stokes solver
- * via webgl-fluid-enhanced, with two important customisations:
+ * Aurora fluid background — single visible layer, always alive.
  *
- *   1.  Aurora-inspired palette (emerald + deep blue + violet + gold) —
- *       reads as "flowing nature" instead of clinical loop.
- *   2.  Pointer events are listened at the WINDOW level and forwarded as
- *       manual splats. This makes the cursor effect work everywhere on
- *       the page, not just over the canvas — UI cards on top no longer
- *       absorb the events.
+ * Lessons from previous iterations:
+ *   • Transparent overlay + base layer = brittle stacking; ditch the layering.
+ *   • Aggressive dissipation made trails disappear before you noticed them;
+ *     keep colour on screen for ~6 seconds, not ~1.
+ *   • If the visitor doesn't move the mouse, the page should still flow —
+ *     so we periodically inject autonomous splats at random screen positions.
+ *
+ * Single canvas. Always visible. Bright. Reacts to the cursor on every
+ * surface of the page (window-level pointer listener).
  */
 import { useEffect, useRef } from "react";
 
@@ -35,15 +37,14 @@ export default function FluidCanvas() {
 
         const sim = new WebGLFluidEnhanced(containerRef.current);
 
-        // Aurora / deep-ocean palette — flowing nature colours
+        // Aurora / deep-ocean — saturated so the colour reads even on a 2K display.
         const palette = [
           "#10b981",   // emerald
-          "#34d399",   // mint
           "#22d3ee",   // cyan
           "#3b82f6",   // azure
           "#8b5cf6",   // violet
-          "#ec4899",   // soft magenta (rare, peeks through)
-          "#f0d9a6",   // dawn gold (rare)
+          "#ec4899",   // soft magenta
+          "#f0d9a6",   // dawn gold
         ];
 
         sim.setConfig({
@@ -51,63 +52,61 @@ export default function FluidCanvas() {
           dyeResolution: 1024,
           captureResolution: 512,
 
-          // Trails linger like aurora curtains, but pointer pushes are gentle.
-          densityDissipation:  1.25,
-          velocityDissipation: 0.4,
-          pressure: 0.82,
+          // Trails persist a long time — the page is always covered in colour
+          densityDissipation:  0.55,
+          velocityDissipation: 0.25,
+          pressure: 0.85,
           pressureIterations: 18,
-          curl: 30,                    // vorticity — that auroral curl
-          splatRadius: 0.18,           // smaller splash per stroke
-          splatForce: 5500,            // gentler push
+          curl: 32,
+          splatRadius: 0.2,
+          splatForce: 6000,
           shading: true,
 
           colorful: false,
           colorPalette: palette,
           colorUpdateSpeed: 5,
-          backgroundColor: "#000000",
-          transparent: true,           // ★ key: layer over the ocean below
-          brightness: 0.7,
+          backgroundColor: "#02050d",
+          transparent: false,            // OPAQUE — no layering tricks
+          brightness: 0.85,
           inverted: false,
 
           bloom: true,
           bloomIterations: 8,
           bloomResolution: 256,
-          bloomIntensity: 0.62,
-          bloomThreshold: 0.5,
+          bloomIntensity: 0.7,
+          bloomThreshold: 0.45,
           bloomSoftKnee: 0.7,
 
           sunrays: false,
           sunraysResolution: 196,
           sunraysWeight: 0.5,
 
-          // Disable hover-only mode — we feed pointer events manually
           hover: false,
         });
 
         sim.start();
-        sim.multipleSplats(9);   // seed the field with initial colour
 
-        // ─── Window-level pointer handler ─────────────────────────────────
-        // The library's internal pointer listener only fires on its own
-        // container. UI cards above (z-index 10) intercept events first, so
-        // the cursor would only push fluid in the empty edges. By listening
-        // on `window` and calling `splatAtLocation` manually, the cursor
-        // pushes velocity everywhere on the page — including over content.
+        // Seed heavily so the field is full of colour the moment you land
+        for (let i = 0; i < 4; i++) sim.multipleSplats(8);
+
+        // ─── Autonomous splat drift ─────────────────────────────────────
+        // Fire a soft random splat every ~1.5 s so the field keeps evolving
+        // even when the visitor isn't moving the mouse. Without this, after
+        // ~5 s the fluid settles and the page looks dead.
+        const autoSplat = window.setInterval(() => {
+          try { sim.multipleSplats(1); } catch { /* ignore */ }
+        }, 1500);
+
+        // ─── Window-level pointer handler — works everywhere ───────────
         let lastX = 0, lastY = 0, hasLast = false;
         let paletteIdx = 0;
-
-        const pickColor = (): string => {
-          // Cycle through the palette so different gestures get different tints
+        const VEL_SCALE = 1.6;
+        const MAX_VEL = 35;
+        const clamp = (v: number) => Math.max(-MAX_VEL, Math.min(MAX_VEL, v));
+        const pickColor = () => {
           paletteIdx = (paletteIdx + 1) % palette.length;
           return palette[paletteIdx];
         };
-
-        // Velocity scaling — keeps the splat soft and graceful (was 5 which
-        // produced the "exploding" look the user reported).
-        const VEL_SCALE = 1.6;
-        // Clamp per-frame velocity so a very fast flick doesn't fire a giant splat
-        const MAX_VEL = 35;
-        const clamp = (v: number): number => Math.max(-MAX_VEL, Math.min(MAX_VEL, v));
 
         const onMove = (e: PointerEvent) => {
           const x = e.clientX;
@@ -116,16 +115,11 @@ export default function FluidCanvas() {
             const dx = clamp((x - lastX) * VEL_SCALE);
             const dy = clamp((y - lastY) * VEL_SCALE);
             if (dx !== 0 || dy !== 0) {
-              try {
-                sim.splatAtLocation(x, y, dx, dy, pickColor());
-              } catch {
-                /* one-off splat errors are harmless */
-              }
+              try { sim.splatAtLocation(x, y, dx, dy, pickColor()); } catch { /* ignore */ }
             }
           }
           lastX = x; lastY = y; hasLast = true;
         };
-
         const onTouch = (e: TouchEvent) => {
           const t = e.touches[0];
           if (!t) return;
@@ -134,7 +128,7 @@ export default function FluidCanvas() {
             const dx = clamp((x - lastX) * VEL_SCALE);
             const dy = clamp((y - lastY) * VEL_SCALE);
             if (dx !== 0 || dy !== 0) {
-              try { sim.splatAtLocation(x, y, dx, dy, pickColor()); } catch {}
+              try { sim.splatAtLocation(x, y, dx, dy, pickColor()); } catch { /* ignore */ }
             }
           }
           lastX = x; lastY = y; hasLast = true;
@@ -144,6 +138,7 @@ export default function FluidCanvas() {
         window.addEventListener("touchmove",   onTouch, { passive: true });
 
         cleanup = () => {
+          window.clearInterval(autoSplat);
           window.removeEventListener("pointermove", onMove);
           window.removeEventListener("touchmove",   onTouch);
           sim.stop();
@@ -164,7 +159,7 @@ export default function FluidCanvas() {
       style={{
         width: "100vw",
         height: "100vh",
-        zIndex: 1,                     // above the ocean, below content
+        zIndex: 0,
       }}
     />
   );
