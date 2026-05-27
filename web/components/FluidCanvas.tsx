@@ -52,29 +52,30 @@ export default function FluidCanvas() {
           dyeResolution: 1024,
           captureResolution: 512,
 
-          // Soft aurora — never overexposed.
-          densityDissipation:  1.1,
-          velocityDissipation: 0.4,
-          pressure: 0.85,
-          pressureIterations: 18,
-          curl: 28,
-          splatRadius: 0.14,             // ↓ smaller splash per stroke
-          splatForce: 4200,
+          // Transparent overlay — fluid is *only* a cursor interaction layer
+          // on top of the always-on CSS aurora behind. Subtle by design.
+          densityDissipation:  1.4,      // trails fade quickly so they never stack
+          velocityDissipation: 0.5,
+          pressure: 0.82,
+          pressureIterations: 16,
+          curl: 25,
+          splatRadius: 0.12,
+          splatForce: 3500,
           shading: true,
 
           colorful: false,
           colorPalette: palette,
           colorUpdateSpeed: 5,
-          backgroundColor: "#02050d",
-          transparent: false,
-          brightness: 0.45,              // ↓ further — no hot spots
+          backgroundColor: "#000000",
+          transparent: true,             // ★ key: see CSS aurora behind
+          brightness: 0.45,
           inverted: false,
 
-          bloom: true,
+          bloom: false,                  // no bloom — keeps the layer subtle
           bloomIterations: 5,
           bloomResolution: 256,
-          bloomIntensity: 0.22,          // ↓ much softer glow
-          bloomThreshold: 0.7,           // ↑ only the very brightest tips bloom
+          bloomIntensity: 0.1,
+          bloomThreshold: 0.8,
           bloomSoftKnee: 0.65,
 
           sunrays: false,
@@ -85,38 +86,10 @@ export default function FluidCanvas() {
         });
 
         sim.start();
-
-        // Seed splats placed on an explicit grid so colour is spread evenly
-        // across the viewport on first paint — never clustered into one
-        // overexposed hotspot. (The library's `multipleSplats(n)` uses random
-        // positions which were stacking up at the bottom and blowing out.)
-        const W = window.innerWidth;
-        const H = window.innerHeight;
-        const seedAt = (px: number, py: number, color: string) => {
-          // Gentle outward push so the splat doesn't just sit as a static spot
-          const dx = (Math.random() - 0.5) * 12;
-          const dy = (Math.random() - 0.5) * 12;
-          try { sim.splatAtLocation(px * W, py * H, dx, dy, color); } catch { /* ignore */ }
-        };
-        // 3 × 3 grid biased toward upper screen (where the eye lands first)
-        const gridX = [0.18, 0.50, 0.82];
-        const gridY = [0.22, 0.50, 0.78];
-        gridX.forEach((x, ix) => gridY.forEach((y, iy) => {
-          seedAt(x, y, palette[(ix * 3 + iy) % palette.length]);
-        }));
-
-        // ─── Autonomous drift ───────────────────────────────────────────
-        // One soft splat every ~3 s at a fresh random viewport position so
-        // the field keeps evolving even when the cursor is idle. Never two
-        // in the same place because random covers the whole viewport.
-        const autoSplat = window.setInterval(() => {
-          const x = (0.1 + Math.random() * 0.8) * window.innerWidth;
-          const y = (0.1 + Math.random() * 0.8) * window.innerHeight;
-          const dx = (Math.random() - 0.5) * 10;
-          const dy = (Math.random() - 0.5) * 10;
-          const c = palette[Math.floor(Math.random() * palette.length)];
-          try { sim.splatAtLocation(x, y, dx, dy, c); } catch { /* ignore */ }
-        }, 3000);
+        // No seed splats. No auto-splats. The fluid layer is now ONLY a
+        // cursor interaction layer — the always-on CSS aurora behind is
+        // what the visitor sees as the "background". This eliminates every
+        // blowout / hotspot / cluster issue.
 
         // ─── Window-level pointer handler — works everywhere ───────────
         let lastX = 0, lastY = 0, hasLast = false;
@@ -159,7 +132,6 @@ export default function FluidCanvas() {
         window.addEventListener("touchmove",   onTouch, { passive: true });
 
         cleanup = () => {
-          window.clearInterval(autoSplat);
           window.removeEventListener("pointermove", onMove);
           window.removeEventListener("touchmove",   onTouch);
           sim.stop();

@@ -1,6 +1,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import AuroraBase  from "@/components/AuroraBase";
 import FluidCanvas from "@/components/FluidCanvas";
 
 export const metadata: Metadata = {
@@ -13,6 +14,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>
+        <AuroraBase />
         <FluidCanvas />
         {children}
       </body>

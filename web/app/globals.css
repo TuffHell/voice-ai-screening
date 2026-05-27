@@ -5,16 +5,40 @@
 @tailwind utilities;
 
 @layer base {
-  html { scroll-behavior: smooth; background: #040711; }
+  html { scroll-behavior: smooth; background: #050a18; }
   body {
     @apply font-sans text-ice-50 antialiased;
-    /* No background — the FluidCanvas paints the viewport behind. The body
-       was previously an opaque gradient which covered the fluid entirely. */
     background: transparent;
     letter-spacing: -0.005em;
     min-height: 100vh;
   }
   ::selection { background: rgba(74,130,255,0.35); color: white; }
+
+  /* Always-on aurora background. Five layered radial gradients drift on
+     independent paths via background-position. GPU-composited, never
+     blows out, visible everywhere. */
+  .aurora-layer {
+    background:
+      radial-gradient(60vw 55vh at 20% 25%, rgba(16, 185, 129, 0.18),  transparent 65%),
+      radial-gradient(70vw 60vh at 80% 35%, rgba(59, 130, 246, 0.22),  transparent 65%),
+      radial-gradient(50vw 50vh at 55% 75%, rgba(139, 92, 246, 0.18),  transparent 65%),
+      radial-gradient(60vw 45vh at 30% 80%, rgba(34, 211, 238, 0.14),  transparent 65%),
+      radial-gradient(40vw 35vh at 80% 90%, rgba(212, 175, 106, 0.12), transparent 65%),
+      linear-gradient(135deg, #050a18 0%, #0a1428 50%, #050a18 100%);
+    background-size:
+      220% 220%, 220% 220%, 220% 220%, 220% 220%, 220% 220%, 100% 100%;
+    background-attachment: fixed;
+    animation: aurora-flow 55s ease-in-out infinite alternate;
+    will-change: background-position;
+  }
+
+  @keyframes aurora-flow {
+    0%   { background-position:  0% 10%, 100%  0%, 50% 100%,  0% 50%, 100% 50%, 0 0; }
+    25%  { background-position: 30% 30%,  70% 20%, 60%  70%, 25% 30%,  80% 60%, 0 0; }
+    50%  { background-position: 60% 50%,  40% 40%, 30%  50%, 50% 60%,  60% 80%, 0 0; }
+    75%  { background-position: 80% 30%,  20% 60%, 50%  20%, 75% 40%,  40% 30%, 0 0; }
+    100% { background-position: 10% 60%,  90% 70%, 70%  30%, 35% 70%,  70% 30%, 0 0; }
+  }
 }
 
 @layer components {
