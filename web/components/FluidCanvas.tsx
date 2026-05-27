@@ -31,9 +31,15 @@ export default function FluidCanvas() {
     let cleanup: (() => void) | undefined;
 
     (async () => {
-      const { default: WebGLFluidEnhanced } = await import("webgl-fluid-enhanced");
-      if (!containerRef.current) return;
-      const sim = new WebGLFluidEnhanced(containerRef.current);
+      try {
+        const mod = await import("webgl-fluid-enhanced");
+        const WebGLFluidEnhanced = mod.default ?? (mod as unknown as { WebGLFluidEnhanced: typeof mod.default }).WebGLFluidEnhanced;
+        if (!containerRef.current) return;
+        if (!WebGLFluidEnhanced) {
+          console.error("[FluidCanvas] webgl-fluid-enhanced has no default export", mod);
+          return;
+        }
+        const sim = new WebGLFluidEnhanced(containerRef.current);
 
       sim.setConfig({
         // Resolution / quality
@@ -84,13 +90,16 @@ export default function FluidCanvas() {
         hover: true,
       });
 
-      sim.start();
+        sim.start();
 
-      // Seed with a few gentle splats on first load so there's already a
-      // softly-glowing field when the visitor lands.
-      sim.multipleSplats(7);
+        // Seed with a few gentle splats on first load so there's already a
+        // softly-glowing field when the visitor lands.
+        sim.multipleSplats(7);
 
-      cleanup = () => sim.stop();
+        cleanup = () => sim.stop();
+      } catch (err) {
+        console.error("[FluidCanvas] failed to initialise:", err);
+      }
     })();
 
     return () => { cleanup?.(); };
@@ -100,8 +109,12 @@ export default function FluidCanvas() {
     <div
       ref={containerRef}
       aria-hidden
-      className="fixed inset-0 -z-[1]"
-      style={{ width: "100vw", height: "100vh" }}
+      className="fixed inset-0"
+      style={{
+        width: "100vw",
+        height: "100vh",
+        zIndex: 0,           // behind content (z-10) but above html background
+      }}
     />
   );
 }
