@@ -52,30 +52,30 @@ export default function FluidCanvas() {
           dyeResolution: 1024,
           captureResolution: 512,
 
-          // Trails persist a long time — the page is always covered in colour
-          densityDissipation:  0.55,
-          velocityDissipation: 0.25,
+          // Aurora curtains — present but never overexposed.
+          densityDissipation:  1.0,    // trails fade gracefully (~3s)
+          velocityDissipation: 0.35,
           pressure: 0.85,
           pressureIterations: 18,
-          curl: 32,
-          splatRadius: 0.2,
-          splatForce: 6000,
+          curl: 30,
+          splatRadius: 0.18,
+          splatForce: 5000,
           shading: true,
 
           colorful: false,
           colorPalette: palette,
           colorUpdateSpeed: 5,
           backgroundColor: "#02050d",
-          transparent: false,            // OPAQUE — no layering tricks
-          brightness: 0.85,
+          transparent: false,
+          brightness: 0.55,              // ↓ from 0.85 — no more blown-out wash
           inverted: false,
 
           bloom: true,
-          bloomIterations: 8,
+          bloomIterations: 6,
           bloomResolution: 256,
-          bloomIntensity: 0.7,
-          bloomThreshold: 0.45,
-          bloomSoftKnee: 0.7,
+          bloomIntensity: 0.32,          // ↓ from 0.7 — soft glow on crests only
+          bloomThreshold: 0.6,           // ↑ from 0.45 — only the brightest tips bloom
+          bloomSoftKnee: 0.65,
 
           sunrays: false,
           sunraysResolution: 196,
@@ -86,8 +86,9 @@ export default function FluidCanvas() {
 
         sim.start();
 
-        // Seed heavily so the field is full of colour the moment you land
-        for (let i = 0; i < 4; i++) sim.multipleSplats(8);
+        // Seed gently — a few scattered splats so the page isn't pitch-black
+        // on load, but never enough to wash out into white.
+        sim.multipleSplats(6);
 
         // ─── Autonomous splat drift ─────────────────────────────────────
         // Fire a soft random splat every ~1.5 s so the field keeps evolving
@@ -95,7 +96,7 @@ export default function FluidCanvas() {
         // ~5 s the fluid settles and the page looks dead.
         const autoSplat = window.setInterval(() => {
           try { sim.multipleSplats(1); } catch { /* ignore */ }
-        }, 1500);
+        }, 2400);
 
         // ─── Window-level pointer handler — works everywhere ───────────
         let lastX = 0, lastY = 0, hasLast = false;
