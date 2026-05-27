@@ -18,14 +18,14 @@
 }
 
 @layer components {
-  /* Cards intentionally translucent so the fluid background flows through.
+  /* Cards very translucent so the aurora flows through every section.
      backdrop-blur keeps text legible against any local fluid colour. */
   .glass {
-    @apply bg-gradient-to-b from-ink-700/30 to-ink-900/50 backdrop-blur-xl
-           border border-white/10 rounded-2xl;
+    @apply bg-gradient-to-b from-ink-700/15 to-ink-900/30 backdrop-blur-xl
+           border border-white/[0.08] rounded-2xl;
   }
   .glass-strong {
-    @apply bg-gradient-to-b from-ink-700/45 to-ink-900/65 backdrop-blur-2xl
+    @apply bg-gradient-to-b from-ink-700/25 to-ink-900/45 backdrop-blur-2xl
            border border-white/10 rounded-3xl shadow-[0_20px_60px_-20px_rgba(2,8,23,0.7)];
   }
   .eyebrow {

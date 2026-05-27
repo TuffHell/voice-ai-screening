@@ -52,14 +52,14 @@ export default function FluidCanvas() {
           dyeResolution: 1024,
           captureResolution: 512,
 
-          // Aurora curtains — present but never overexposed.
-          densityDissipation:  1.0,    // trails fade gracefully (~3s)
-          velocityDissipation: 0.35,
+          // Soft aurora — never overexposed.
+          densityDissipation:  1.1,
+          velocityDissipation: 0.4,
           pressure: 0.85,
           pressureIterations: 18,
-          curl: 30,
-          splatRadius: 0.18,
-          splatForce: 5000,
+          curl: 28,
+          splatRadius: 0.14,             // ↓ smaller splash per stroke
+          splatForce: 4200,
           shading: true,
 
           colorful: false,
@@ -67,14 +67,14 @@ export default function FluidCanvas() {
           colorUpdateSpeed: 5,
           backgroundColor: "#02050d",
           transparent: false,
-          brightness: 0.55,              // ↓ from 0.85 — no more blown-out wash
+          brightness: 0.45,              // ↓ further — no hot spots
           inverted: false,
 
           bloom: true,
-          bloomIterations: 6,
+          bloomIterations: 5,
           bloomResolution: 256,
-          bloomIntensity: 0.32,          // ↓ from 0.7 — soft glow on crests only
-          bloomThreshold: 0.6,           // ↑ from 0.45 — only the brightest tips bloom
+          bloomIntensity: 0.22,          // ↓ much softer glow
+          bloomThreshold: 0.7,           // ↑ only the very brightest tips bloom
           bloomSoftKnee: 0.65,
 
           sunrays: false,
@@ -86,17 +86,37 @@ export default function FluidCanvas() {
 
         sim.start();
 
-        // Seed gently — a few scattered splats so the page isn't pitch-black
-        // on load, but never enough to wash out into white.
-        sim.multipleSplats(6);
+        // Seed splats placed on an explicit grid so colour is spread evenly
+        // across the viewport on first paint — never clustered into one
+        // overexposed hotspot. (The library's `multipleSplats(n)` uses random
+        // positions which were stacking up at the bottom and blowing out.)
+        const W = window.innerWidth;
+        const H = window.innerHeight;
+        const seedAt = (px: number, py: number, color: string) => {
+          // Gentle outward push so the splat doesn't just sit as a static spot
+          const dx = (Math.random() - 0.5) * 12;
+          const dy = (Math.random() - 0.5) * 12;
+          try { sim.splatAtLocation(px * W, py * H, dx, dy, color); } catch { /* ignore */ }
+        };
+        // 3 × 3 grid biased toward upper screen (where the eye lands first)
+        const gridX = [0.18, 0.50, 0.82];
+        const gridY = [0.22, 0.50, 0.78];
+        gridX.forEach((x, ix) => gridY.forEach((y, iy) => {
+          seedAt(x, y, palette[(ix * 3 + iy) % palette.length]);
+        }));
 
-        // ─── Autonomous splat drift ─────────────────────────────────────
-        // Fire a soft random splat every ~1.5 s so the field keeps evolving
-        // even when the visitor isn't moving the mouse. Without this, after
-        // ~5 s the fluid settles and the page looks dead.
+        // ─── Autonomous drift ───────────────────────────────────────────
+        // One soft splat every ~3 s at a fresh random viewport position so
+        // the field keeps evolving even when the cursor is idle. Never two
+        // in the same place because random covers the whole viewport.
         const autoSplat = window.setInterval(() => {
-          try { sim.multipleSplats(1); } catch { /* ignore */ }
-        }, 2400);
+          const x = (0.1 + Math.random() * 0.8) * window.innerWidth;
+          const y = (0.1 + Math.random() * 0.8) * window.innerHeight;
+          const dx = (Math.random() - 0.5) * 10;
+          const dy = (Math.random() - 0.5) * 10;
+          const c = palette[Math.floor(Math.random() * palette.length)];
+          try { sim.splatAtLocation(x, y, dx, dy, c); } catch { /* ignore */ }
+        }, 3000);
 
         // ─── Window-level pointer handler — works everywhere ───────────
         let lastX = 0, lastY = 0, hasLast = false;
