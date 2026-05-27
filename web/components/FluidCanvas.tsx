@@ -64,9 +64,9 @@ export default function FluidCanvas() {
           colorful: false,
           colorPalette: palette,
           colorUpdateSpeed: 5,
-          backgroundColor: "#02050d",  // near-black with a hint of deep blue
-          transparent: false,
-          brightness: 0.65,
+          backgroundColor: "#000000",
+          transparent: true,           // ★ key: layer over the ocean below
+          brightness: 0.7,
           inverted: false,
 
           bloom: true,
@@ -164,7 +164,7 @@ export default function FluidCanvas() {
       style={{
         width: "100vw",
         height: "100vh",
-        zIndex: 0,
+        zIndex: 1,                     // above the ocean, below content
       }}
     />
   );
