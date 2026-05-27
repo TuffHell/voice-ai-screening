@@ -28,12 +28,13 @@ interface Blob {
   alpha: number;
 }
 
+// Light cursor trail — 3 blobs read as a layered trail without the GPU cost
+// of 5. Half the radii of the previous version means each frame paints
+// roughly 1/4 the pixels.
 const BLOBS: Omit<Blob, "tx" | "ty" | "cx" | "cy">[] = [
-  { ease: 0.07, r: 260, rgb: "74,130,255",  alpha: 0.16 },
-  { ease: 0.10, r: 180, rgb: "143,186,255", alpha: 0.13 },
-  { ease: 0.15, r: 120, rgb: "212,175,106", alpha: 0.10 },
-  { ease: 0.22, r:  72, rgb: "240,217,166", alpha: 0.13 },
-  { ease: 0.36, r:  34, rgb: "255,255,255", alpha: 0.22 },
+  { ease: 0.12, r: 140, rgb: "74,130,255",  alpha: 0.18 },
+  { ease: 0.22, r:  72, rgb: "143,186,255", alpha: 0.18 },
+  { ease: 0.42, r:  28, rgb: "240,247,255", alpha: 0.30 },
 ];
 
 export default function CursorBubbles() {
