@@ -33,134 +33,23 @@ uniform vec2  u_res;
 uniform vec2  u_mouse;       // normalised 0..1 (y already flipped)
 uniform float u_time;
 
-// ── Hash + noise + fbm ────────────────────────────────────────────────
-vec2 hash22(vec2 p) {
-  p = vec2(dot(p, vec2(127.1, 311.7)),
-           dot(p, vec2(269.5, 183.3)));
-  return -1.0 + 2.0 * fract(sin(p) * 43758.5453);
-}
-float noise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  vec2 u = f * f * (3.0 - 2.0 * f);
-  return mix(
-    mix(dot(hash22(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0)),
-        dot(hash22(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0)), u.x),
-    mix(dot(hash22(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0)),
-        dot(hash22(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0)), u.x),
-    u.y);
-}
-float fbm(vec2 p) {
-  float v = 0.0;
-  float a = 0.5;
-  for (int i = 0; i < 5; i++) {
-    v += a * noise(p);
-    p *= 2.02;
-    a *= 0.5;
-  }
-  return v;
-}
+// ── Ocean height field — superposition of warped sine waves ───────────
+// Five wave layers at different angles, frequencies and speeds, sampled
+// in a slowly-warped coordinate space so the wave shapes are organic
+// instead of mathematically perfect. Cheap on the GPU: ~16 ALU ops.
+float oceanHeight(vec2 p, float t) {
+  // Warp the sampling space → curving, non-rectilinear wave fronts
+  vec2 q = p;
+  q.x += 0.18 * sin(p.y * 1.4 + t * 0.40);
+  q.y += 0.14 * cos(p.x * 1.1 + t * 0.35);
 
-// ── Wave caustics — interference of three rotating sine wave fields ────
-float caustics(vec2 p, float t) {
-  vec2 q = p * 4.5;
-  float c = 0.0;
-  for (int i = 0; i < 3; i++) {
-    float fi = float(i);
-    q = vec2(
-      q.x + sin(q.y * (1.3 + fi * 0.2) + t * (1.0 + fi * 0.13)),
-      q.y + cos(q.x * (1.1 + fi * 0.18) + t * (0.7 + fi * 0.11))
-    );
-    c += 1.0 / max(0.15, length(q));
-  }
-  return c / 3.0;
-}
-
-// ── Floating particle field — small bright dots drifting upward ───────
-float particles(vec2 p, float t) {
-  // Move sample space slowly upward over time so dots drift up
-  p.y -= t * 0.08;
-  vec2 i = floor(p * 22.0);
-  vec2 f = fract(p * 22.0);
-  // Per-cell random offset + intensity
-  vec2 r  = hash22(i);
-  float radius = 0.03 + 0.06 * fract(r.x * 9.71);
-  // Twinkle: each particle modulates its brightness with its own phase
-  float twinkle = 0.55 + 0.45 * sin(t * (1.0 + fract(r.y * 17.3)) + r.x * 6.28);
-  float d = length(f - (r * 0.5 + 0.25));
-  return smoothstep(radius, 0.0, d) * twinkle * step(0.7, fract(r.x * 53.0 + r.y * 17.0));
-}
-
-// ── Subtle horizon grid — distant perspective lines ───────────────────
-float horizonGrid(vec2 uv) {
-  float depth = smoothstep(0.65, 1.0, uv.y);
-  float density = mix(8.0, 28.0, depth);
-  vec2 g = abs(fract(vec2(uv.x * density, uv.y * 14.0)) - 0.5);
-  float line = max(
-    smoothstep(0.49, 0.50, 0.5 - g.x),
-    smoothstep(0.49, 0.50, 0.5 - g.y)
-  );
-  return line * depth * 0.18;
-}
-
-// ── Distant starfield — sparse, twinkling pinpoint stars ──────────────
-float starfield(vec2 p, float t) {
-  // Spatial hash on a fine grid → sparse, random star placement
-  vec2 g = floor(p * 80.0);
-  vec2 r = fract(sin(vec2(dot(g, vec2(127.1, 311.7)),
-                          dot(g, vec2(269.5, 183.3)))) * 43758.5453);
-  // Only ~4 % of cells get a star
-  if (r.x < 0.96) return 0.0;
-  vec2 cellCenter = (g + r) / 80.0;
-  float d = length(p - cellCenter);
-  // Each star twinkles with its own phase + speed
-  float twinkle = 0.4 + 0.6 * sin(t * (1.0 + r.y * 2.5) + r.x * 6.28);
-  return smoothstep(0.008, 0.0, d) * twinkle;
-}
-
-// ── God rays — vertical light curtains descending from above ──────────
-float godRays(vec2 uv, float t) {
-  float r = 0.0;
-  // 4 ray columns at different x positions, each pulsing on its own phase
-  for (int i = 0; i < 4; i++) {
-    float fi = float(i);
-    float x = 0.18 + 0.22 * fi + 0.04 * sin(t * 0.3 + fi * 1.3);
-    float dx = uv.x - x;
-    float bell = exp(-dx * dx * 220.0);            // narrow vertical bell
-    float falloff = mix(0.25, 1.0, 1.0 - uv.y);    // brightest at top
-    float pulse = 0.55 + 0.45 * sin(t * 0.7 + fi * 1.9);
-    r += bell * falloff * pulse;
-  }
-  return r * 0.16;
-}
-
-// ── Comet — a periodic streak that crosses the screen every ~14 s ─────
-float comet(vec2 uv, float t) {
-  float cycle = 14.0;
-  float local = mod(t + 3.0, cycle);
-  // Visible for 2.6 s of the cycle
-  if (local > 2.6) return 0.0;
-  float phase = local / 2.6;
-  // Diagonal sweep across the screen
-  vec2 a = vec2(-0.15,  0.78);
-  vec2 b = vec2( 1.15,  0.18);
-  vec2 head = mix(a, b, phase);
-  vec2 dir  = normalize(b - a);
-
-  vec2  rel    = uv - head;
-  // Project pixel onto the line behind the head
-  float along  = dot(rel, -dir);
-  vec2  perpV  = rel + dir * along;
-  float perp   = length(perpV);
-
-  // Bright head + tapered trail behind it
-  float headBlob = smoothstep(0.012, 0.0, length(rel));
-  float trail    = step(0.0, along)
-                 * smoothstep(0.004, 0.0, perp)
-                 * smoothstep(0.30,  0.0, along);
-  // Fade in / out at the boundaries of the visible window
-  float window = smoothstep(0.0, 0.15, phase) * smoothstep(1.0, 0.85, phase);
-  return (headBlob * 1.6 + trail) * window;
+  float h = 0.0;
+  h += sin(dot(q, vec2( 0.60,  0.80)) *  2.0 + t * 1.20) * 0.50;
+  h += sin(dot(q, vec2(-0.70,  0.60)) *  3.5 + t * 1.65) * 0.30;
+  h += sin(dot(q, vec2( 0.40, -0.90)) *  5.5 + t * 2.30) * 0.18;
+  h += sin(dot(q, vec2( 0.80,  0.30)) *  9.0 + t * 3.00) * 0.10;
+  h += sin(dot(q, vec2(-0.30,  1.10)) * 14.0 + t * 4.50) * 0.05;
+  return h;
 }
 
 void main() {
@@ -169,83 +58,48 @@ void main() {
   vec2 p       = (uv - 0.5) * vec2(aspect, 1.0);
   vec2 mp      = (u_mouse - 0.5) * vec2(aspect, 1.0);
 
-  // Mouse warp
+  // Mouse displaces the wave field locally — a soft pull
   vec2  toMouse = mp - p;
   float mDist   = length(toMouse);
-  float warpAmt = smoothstep(0.55, 0.0, mDist) * 0.22;
-  vec2  warpVec = toMouse * warpAmt;
+  vec2  warp    = toMouse * smoothstep(0.55, 0.0, mDist) * 0.16;
 
-  float t = u_time * 0.045;
+  // Ocean height (-1..1 ish)
+  float h = oceanHeight(p + warp, u_time * 0.28);
 
-  // ── Aurora field (domain-warped fbm) ─────────────────────────────────
-  vec2 q = vec2(
-    fbm(p * 1.4 + vec2( t, -t * 0.7) + warpVec),
-    fbm(p * 1.4 + vec2(-t * 0.5, t * 0.9) + warpVec * 0.8)
-  );
-  vec2 r = vec2(
-    fbm(p * 1.8 + q + vec2(1.7, 9.2) + warpVec * 0.5),
-    fbm(p * 1.8 + q + vec2(8.3, 2.8) + warpVec * 0.5)
-  );
-  float f = fbm(p * 1.6 + 1.5 * r + t * 0.8);
+  // Foam: only where the wave crest is sharpest — narrow band near the top
+  // edge of the height range. A windowed smoothstep keeps it crisp.
+  float foam = smoothstep(0.55, 0.82, h) * smoothstep(0.95, 0.82, h);
 
-  // ── Wave caustics on top ─────────────────────────────────────────────
-  float caust = caustics(p + warpVec * 0.5, u_time * 0.7) - 0.5;
-  caust = clamp(caust * 0.9, 0.0, 1.0);
+  // Caustic-like sub-surface highlight following the wave gradient — gives
+  // the feeling of light dancing through clearer water under the surface.
+  float caust = smoothstep(0.20, 0.55, h) * (0.4 + 0.6 * sin(h * 14.0 + u_time * 0.8));
+  caust = max(caust, 0.0);
 
-  // ── Aurora colour palette ────────────────────────────────────────────
-  vec3 deep      = vec3(0.020, 0.040, 0.100);
-  vec3 ink       = vec3(0.040, 0.075, 0.160);
-  vec3 emerald   = vec3(0.063, 0.725, 0.506);
-  vec3 cyan      = vec3(0.133, 0.827, 0.933);
-  vec3 azure     = vec3(0.231, 0.510, 0.965);
-  vec3 violet    = vec3(0.545, 0.361, 0.965);
-  vec3 gold      = vec3(0.941, 0.851, 0.651);
+  // Ocean palette (deep, navy, teal, surface, foam white)
+  vec3 deep   = vec3(0.010, 0.040, 0.100);
+  vec3 navy   = vec3(0.030, 0.105, 0.230);
+  vec3 teal   = vec3(0.080, 0.345, 0.520);
+  vec3 surf   = vec3(0.265, 0.620, 0.855);
+  vec3 foamC  = vec3(0.945, 0.975, 1.000);
 
   vec3 col = deep;
-  col = mix(col, ink,     smoothstep(-0.20, 0.40, f));
-  col = mix(col, azure,   smoothstep( 0.05, 0.55, f) * 0.62);
-  col = mix(col, emerald, smoothstep( 0.20, 0.65, f) * 0.38);
-  col = mix(col, cyan,    smoothstep( 0.45, 0.78, f) * 0.55);
-  col = mix(col, violet,  smoothstep( 0.55, 0.85, f) * 0.50);
-  col = mix(col, gold,    smoothstep( 0.78, 0.95, f) * 0.22);
+  col = mix(col, navy, smoothstep(-0.60, -0.05, h));
+  col = mix(col, teal, smoothstep(-0.20,  0.30, h));
+  col = mix(col, surf, smoothstep( 0.15,  0.60, h));
+  col = mix(col, foamC, foam);
 
-  // ── Far-field starfield (parallax: very slow drift on time) ─────────
-  vec2 starP = p + vec2(u_time * 0.005, -u_time * 0.003);
-  float sf = starfield(starP, u_time);
-  col += vec3(0.85, 0.92, 1.0) * sf;
+  // Sub-surface caustic highlights — subtle warm-blue accent
+  col += vec3(0.30, 0.55, 0.85) * caust * 0.18;
 
-  // ── God rays — vertical light curtains descending from above ────────
-  col += vec3(0.5, 0.7, 1.0) * godRays(uv, u_time);
-
-  // Caustics — like sunlight through water
-  col += vec3(0.45, 0.75, 1.0) * caust * 0.22;
-
-  // Subtle horizon grid — architectural depth cue near the bottom
-  col += vec3(0.4, 0.65, 1.0) * horizonGrid(uv);
-
-  // Floating bioluminescent particles
-  float pf = particles(p + warpVec * 0.3, u_time);
-  col += vec3(0.7, 0.9, 1.0) * pf * 0.65;
-
-  // ── Periodic comet streak — a "story moment" every ~14 s ────────────
-  float cm = comet(uv, u_time);
-  col += vec3(1.0, 0.95, 0.85) * cm * 0.85;
-  // Soft halo around the comet head
-  col += vec3(0.7, 0.85, 1.0) * cm * 0.35;
-
-  // Mouse halo
-  col += vec3(0.45, 0.65, 1.0) * smoothstep(0.30, 0.0, mDist) * 0.12;
-  col += vec3(0.95, 0.85, 0.65) * smoothstep(0.12, 0.0, mDist) * 0.10;
-
-  // ── Breathing pulse — gentle global modulation, ~6 s period ─────────
-  float breath = 0.92 + 0.08 * sin(u_time * 1.05);
-  col *= breath;
+  // Mouse halo — gentle warm-light kiss where the pointer is
+  col += vec3(0.40, 0.65, 0.95) * smoothstep(0.28, 0.0, mDist) * 0.14;
+  col += vec3(0.95, 0.90, 0.75) * smoothstep(0.08, 0.0, mDist) * 0.08;
 
   // Vignette
   float vig = smoothstep(1.20, 0.35, length(uv - 0.5));
   col *= mix(0.55, 1.0, vig);
 
-  // 8-bit dither
+  // 8-bit dither to kill banding on dark gradients
   float dith = (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
   col += vec3(dith);
 
