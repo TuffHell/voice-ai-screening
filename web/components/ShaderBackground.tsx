@@ -33,126 +33,84 @@ uniform vec2  u_res;
 uniform vec2  u_mouse;
 uniform float u_time;
 
-// ── Wave height field for the side-view ocean ─────────────────────────
-// 'x' is horizontal position, 'd' is distance-from-camera (0 = close, 1 = far).
-// Closer waves are larger and more detailed; distant waves smaller and softer
-// (atmospheric perspective). Five superimposed waves with cross-coupled phase
-// so they don't repeat obviously.
-float waveHeight(float x, float d, float t) {
-  // Distance-based amplitude: bigger amplitude near the camera
-  float amp = mix(0.085, 0.012, d);
-  // Distance-based frequency: tighter (smaller-looking) waves near horizon
-  float freq = mix(8.0, 32.0, d);
+// ── Smooth value noise (cubic interpolation) ──────────────────────────
+vec2 hash22(vec2 p) {
+  p = vec2(dot(p, vec2(127.1, 311.7)),
+           dot(p, vec2(269.5, 183.3)));
+  return -1.0 + 2.0 * fract(sin(p) * 43758.5453);
+}
+float noise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  // Smoother (quintic) interpolation → no faceting in the bubble surface
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  return mix(
+    mix(dot(hash22(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0)),
+        dot(hash22(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0)), u.x),
+    mix(dot(hash22(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0)),
+        dot(hash22(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0)), u.x),
+    u.y);
+}
+float fbm(vec2 p) {
+  float v = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 4; i++) { v += a * noise(p); p *= 2.04; a *= 0.5; }
+  return v;
+}
 
-  // Slow large swell
-  float h  = sin(x * (freq * 0.45) + t * 0.55 + sin(x * 1.7) * 0.6) * 0.55;
-  // Secondary cross-swell
-  h += sin(x * (freq * 0.9) - t * 0.85 + cos(x * 2.3 + t * 0.3) * 0.4) * 0.32;
-  // Mid-frequency chop
-  h += sin(x * (freq * 1.8) + t * 1.3 + sin(x * 5.1 - t * 0.6) * 0.3) * 0.18;
-  // Fine ripples
-  h += sin(x * (freq * 3.6) - t * 1.9) * 0.08;
-  // Tiny spray-level detail
-  h += sin(x * (freq * 7.5) + t * 3.2) * 0.04;
-
-  return h * amp;
+// ── Iridescent thin-film palette (Inigo Quilez cosine-palette) ────────
+// Reads like the rainbow shift on a soap bubble's surface.
+vec3 iridescent(float t) {
+  vec3 a = vec3(0.50, 0.50, 0.50);
+  vec3 b = vec3(0.45, 0.45, 0.45);
+  vec3 c = vec3(1.00, 1.00, 1.00);
+  vec3 d = vec3(0.10, 0.33, 0.67);
+  return a + b * cos(6.28318 * (c * t + d));
 }
 
 void main() {
-  vec2 uv = v_uv;
+  vec2 uv      = v_uv;
+  float aspect = u_res.x / u_res.y;
+  vec2 p       = (uv - 0.5) * vec2(aspect, 1.0);
+  vec2 mp      = (u_mouse - 0.5) * vec2(aspect, 1.0);
 
-  // Horizon position — slightly above middle so the ocean dominates
-  // (mouse Y nudges it ±0.04 for a subtle parallax)
-  float horizon = 0.46 + (u_mouse.y - 0.5) * 0.04;
+  // Soft mouse warp — pulls the field gently toward the pointer
+  vec2  toMouse = mp - p;
+  float mDist   = length(toMouse);
+  vec2  warp    = toMouse * smoothstep(0.55, 0.0, mDist) * 0.18;
 
-  vec3 col;
+  float t = u_time * 0.05;
 
-  // ─────────────────────────── SKY ────────────────────────────────────
-  if (uv.y > horizon) {
-    // t: 0 at horizon, 1 at top of viewport
-    float t = clamp((uv.y - horizon) / max(0.0001, 1.0 - horizon), 0.0, 1.0);
+  // Domain-warped, slow-evolving smooth bubble surface — three layers of
+  // mutual displacement so the field slithers organically (no straight
+  // edges, no foam, no hard transitions; everything rolls).
+  vec2 q  = vec2(fbm(p * 1.20 + vec2( t, -t * 0.6) + warp),
+                 fbm(p * 1.20 + vec2(-t * 0.7,  t * 0.8) + warp * 0.8));
+  vec2 r  = vec2(fbm(p * 1.55 + 1.6 * q + vec2( 5.2,  1.3)),
+                 fbm(p * 1.55 + 1.6 * q + vec2(-3.7,  8.4)));
+  float h = fbm(p * 1.35 + 1.4 * r + t * 0.8);
 
-    // Cool dusk → deep dusk gradient, kept in the clinical palette
-    // (no bright peach — the page text is white-on-dark and a warm sky
-    //  would clash with the rest of the design).
-    vec3 skyHorizon = vec3(0.295, 0.395, 0.530);   // dusty blue
-    vec3 skyMid     = vec3(0.140, 0.220, 0.380);   // navy-violet
-    vec3 skyTop     = vec3(0.055, 0.105, 0.220);   // deep dusk
-    col = mix(skyHorizon, skyMid, smoothstep(0.0, 0.45, t));
-    col = mix(col, skyTop, smoothstep(0.45, 1.0, t));
+  // Map smoothly to thin-film iridescence
+  // The 'thickness' parameter shifts with time + a touch of position so
+  // the rainbow drifts across the field as it flows.
+  float thickness = h * 0.85 + 0.15 * length(p) + u_time * 0.025;
+  vec3 col = iridescent(thickness);
 
-    // Soft warm sun-glow band right at the horizon — mouse X moves it
-    float sunX  = 0.5 + (u_mouse.x - 0.5) * 0.4;
-    float sunDX = abs(uv.x - sunX);
-    float sunGlow = smoothstep(0.45, 0.0, sunDX) * smoothstep(0.20, 0.0, t);
-    col += vec3(1.00, 0.78, 0.55) * sunGlow * 0.28;
+  // Pull the colour toward a deep navy base so the iridescence reads as
+  // highlights on a darker surface, not a wash.
+  vec3 base = vec3(0.020, 0.045, 0.110);
+  col = mix(base, col, 0.55 + 0.35 * smoothstep(-0.2, 0.4, h));
 
-    // Distant high-altitude haze band along horizon
-    float horizonBand = smoothstep(0.07, 0.0, t);
-    col += vec3(0.85, 0.78, 0.78) * horizonBand * 0.08;
-  }
-  // ─────────────────────────── OCEAN ──────────────────────────────────
-  else {
-    // d: 0 close to camera (bottom of screen), 1 at horizon (top of ocean)
-    float d = 1.0 - clamp((horizon - uv.y) / horizon, 0.0, 1.0);
+  // Soft inner glow at the mouse — like the bubble film thinning under
+  // gentle pressure where the cursor is
+  col += vec3(0.55, 0.80, 1.00) * smoothstep(0.30, 0.0, mDist) * 0.10;
+  col += vec3(0.95, 0.85, 0.75) * smoothstep(0.08, 0.0, mDist) * 0.06;
 
-    // Perspective compression on X so waves stretch toward the horizon
-    float persp = 1.0 + d * 6.0;
-    float x = (uv.x - 0.5) * persp;
-
-    // Mouse-driven local pull on the X coordinate
-    float mDx = (uv.x - u_mouse.x) * persp;
-    float mDy = (uv.y - u_mouse.y);
-    float mD  = length(vec2(mDx * 0.6, mDy));
-    float warpA = smoothstep(0.35, 0.0, mD) * 0.06;
-    x += (u_mouse.x - 0.5) * warpA * persp;
-
-    // Sample the wave field
-    float h    = waveHeight(x, d, u_time);
-    // Local gradient → approximate slope for shading
-    float hL   = waveHeight(x - 0.005, d, u_time);
-    float hR   = waveHeight(x + 0.005, d, u_time);
-    float slope = (hR - hL) / 0.01;
-
-    // Base ocean colour: dark teal-navy → lighter teal at the surface
-    vec3 oceanDeep = vec3(0.030, 0.075, 0.135);
-    vec3 oceanMid  = vec3(0.060, 0.205, 0.305);
-    vec3 oceanLit  = vec3(0.150, 0.430, 0.555);
-    col = mix(oceanDeep, oceanMid, smoothstep(0.0, 0.7, d));
-    // Brighter where the wave crests are (large h)
-    col = mix(col, oceanLit, smoothstep(0.0, 0.05, h) * 0.6);
-
-    // Foam: where the wave slope is steep AND height is near a crest.
-    // Closer to the camera = more foam visible.
-    float crestNess = smoothstep(0.025, 0.055, h);
-    float steep     = smoothstep(0.25, 1.4, abs(slope));
-    float foam      = crestNess * steep;
-    foam += smoothstep(0.045, 0.07, h) * 0.6;
-    foam *= mix(0.4, 1.4, d * d);   // perspective: more foam visible far away
-    foam  = clamp(foam, 0.0, 1.0);
-
-    // Slight warm sun-kiss on the foam (sunset bouncing off white tops)
-    vec3 foamColor = vec3(0.94, 0.96, 0.98) + vec3(0.04, 0.01, -0.02);
-    col = mix(col, foamColor, foam);
-
-    // Atmospheric perspective — far waves take on horizon colour
-    vec3 horizonTint = vec3(0.295, 0.395, 0.530);
-    col = mix(col, horizonTint, smoothstep(0.65, 1.0, d) * 0.55);
-
-    // Subtle warm reflection band of the sun on water close to camera
-    float sunStrip = smoothstep(0.0, 0.5, h) * smoothstep(0.5, 0.0, d);
-    col += vec3(0.85, 0.55, 0.40) * sunStrip * 0.08;
-  }
-
-  // Soft cursor glow regardless of sky/ocean
-  float mDist = length(vec2((uv.x - u_mouse.x) * (u_res.x / u_res.y), uv.y - u_mouse.y));
-  col += vec3(0.50, 0.70, 1.00) * smoothstep(0.15, 0.0, mDist) * 0.08;
-
-  // Gentle vignette
+  // Vignette
   float vig = smoothstep(1.20, 0.35, length(uv - 0.5));
-  col *= mix(0.70, 1.0, vig);
+  col *= mix(0.65, 1.0, vig);
 
-  // 8-bit dither — kills banding in the smooth sky gradient
+  // 8-bit dither
   float dith = (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
   col += vec3(dith);
 
