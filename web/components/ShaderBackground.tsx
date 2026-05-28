@@ -33,7 +33,7 @@ uniform vec2  u_res;
 uniform vec2  u_mouse;       // normalised 0..1 (y already flipped)
 uniform float u_time;
 
-// ── 2D hash + value noise + fbm (cheap, GPU-friendly) ──────────────────
+// ── Hash + noise + fbm ────────────────────────────────────────────────
 vec2 hash22(vec2 p) {
   p = vec2(dot(p, vec2(127.1, 311.7)),
            dot(p, vec2(269.5, 183.3)));
@@ -53,7 +53,7 @@ float noise(vec2 p) {
 float fbm(vec2 p) {
   float v = 0.0;
   float a = 0.5;
-  for (int i = 0; i < 6; i++) {
+  for (int i = 0; i < 5; i++) {
     v += a * noise(p);
     p *= 2.02;
     a *= 0.5;
@@ -61,22 +61,65 @@ float fbm(vec2 p) {
   return v;
 }
 
+// ── Wave caustics — interference of three rotating sine wave fields ────
+float caustics(vec2 p, float t) {
+  vec2 q = p * 4.5;
+  float c = 0.0;
+  for (int i = 0; i < 3; i++) {
+    float fi = float(i);
+    q = vec2(
+      q.x + sin(q.y * (1.3 + fi * 0.2) + t * (1.0 + fi * 0.13)),
+      q.y + cos(q.x * (1.1 + fi * 0.18) + t * (0.7 + fi * 0.11))
+    );
+    c += 1.0 / max(0.15, length(q));
+  }
+  return c / 3.0;
+}
+
+// ── Floating particle field — small bright dots drifting upward ───────
+float particles(vec2 p, float t) {
+  // Move sample space slowly upward over time so dots drift up
+  p.y -= t * 0.08;
+  vec2 i = floor(p * 22.0);
+  vec2 f = fract(p * 22.0);
+  // Per-cell random offset + intensity
+  vec2 r  = hash22(i);
+  float radius = 0.03 + 0.06 * fract(r.x * 9.71);
+  // Twinkle: each particle modulates its brightness with its own phase
+  float twinkle = 0.55 + 0.45 * sin(t * (1.0 + fract(r.y * 17.3)) + r.x * 6.28);
+  float d = length(f - (r * 0.5 + 0.25));
+  return smoothstep(radius, 0.0, d) * twinkle * step(0.7, fract(r.x * 53.0 + r.y * 17.0));
+}
+
+// ── Subtle horizon grid — distant perspective lines ───────────────────
+float horizonGrid(vec2 uv) {
+  // Only show in the lower half of the screen, fading to nothing on top
+  float depth = smoothstep(0.65, 1.0, uv.y);                  // 0 above midline, 1 at bottom
+  // Vertical lines: more frequent as we approach the bottom (perspective)
+  float density = mix(8.0, 28.0, depth);
+  vec2 g = abs(fract(vec2(uv.x * density, uv.y * 14.0)) - 0.5);
+  float line = max(
+    smoothstep(0.49, 0.50, 0.5 - g.x),
+    smoothstep(0.49, 0.50, 0.5 - g.y)
+  );
+  return line * depth * 0.18;
+}
+
 void main() {
-  // Aspect-correct uv
-  vec2 uv     = v_uv;
+  vec2 uv      = v_uv;
   float aspect = u_res.x / u_res.y;
   vec2 p       = (uv - 0.5) * vec2(aspect, 1.0);
   vec2 mp      = (u_mouse - 0.5) * vec2(aspect, 1.0);
 
-  // Local mouse warp — pulls the noise field gently toward the pointer
-  vec2  toMouse  = mp - p;
-  float mDist    = length(toMouse);
-  float warpAmt  = smoothstep(0.55, 0.0, mDist) * 0.22;
-  vec2  warpVec  = toMouse * warpAmt;
+  // Mouse warp
+  vec2  toMouse = mp - p;
+  float mDist   = length(toMouse);
+  float warpAmt = smoothstep(0.55, 0.0, mDist) * 0.22;
+  vec2  warpVec = toMouse * warpAmt;
 
   float t = u_time * 0.045;
 
-  // Domain-warped FBM — produces the flowing curls
+  // ── Aurora field (domain-warped fbm) ─────────────────────────────────
   vec2 q = vec2(
     fbm(p * 1.4 + vec2( t, -t * 0.7) + warpVec),
     fbm(p * 1.4 + vec2(-t * 0.5, t * 0.9) + warpVec * 0.8)
@@ -87,7 +130,11 @@ void main() {
   );
   float f = fbm(p * 1.6 + 1.5 * r + t * 0.8);
 
-  // Aurora palette — emerald → cyan → azure → violet, with rare gold
+  // ── Wave caustics on top ─────────────────────────────────────────────
+  float caust = caustics(p + warpVec * 0.5, u_time * 0.7) - 0.5;
+  caust = clamp(caust * 0.9, 0.0, 1.0);
+
+  // ── Aurora colour palette ────────────────────────────────────────────
   vec3 deep      = vec3(0.020, 0.040, 0.100);
   vec3 ink       = vec3(0.040, 0.075, 0.160);
   vec3 emerald   = vec3(0.063, 0.725, 0.506);
@@ -97,14 +144,24 @@ void main() {
   vec3 gold      = vec3(0.941, 0.851, 0.651);
 
   vec3 col = deep;
-  col = mix(col, ink,       smoothstep(-0.20, 0.40, f));
-  col = mix(col, azure,     smoothstep( 0.05, 0.55, f) * 0.62);
-  col = mix(col, emerald,   smoothstep( 0.20, 0.65, f) * 0.40);
-  col = mix(col, cyan,      smoothstep( 0.45, 0.78, f) * 0.55);
-  col = mix(col, violet,    smoothstep( 0.55, 0.85, f) * 0.50);
-  col = mix(col, gold,      smoothstep( 0.78, 0.95, f) * 0.22);
+  col = mix(col, ink,     smoothstep(-0.20, 0.40, f));
+  col = mix(col, azure,   smoothstep( 0.05, 0.55, f) * 0.62);
+  col = mix(col, emerald, smoothstep( 0.20, 0.65, f) * 0.38);
+  col = mix(col, cyan,    smoothstep( 0.45, 0.78, f) * 0.55);
+  col = mix(col, violet,  smoothstep( 0.55, 0.85, f) * 0.50);
+  col = mix(col, gold,    smoothstep( 0.78, 0.95, f) * 0.22);
 
-  // Soft cursor halo on top
+  // Caustics add bright sinuous highlights — like sunlight through water
+  col += vec3(0.45, 0.75, 1.0) * caust * 0.22;
+
+  // Subtle horizon grid — architectural depth cue near the bottom
+  col += vec3(0.4, 0.65, 1.0) * horizonGrid(uv);
+
+  // Floating bioluminescent particles
+  float pf = particles(p + warpVec * 0.3, u_time);
+  col += vec3(0.7, 0.9, 1.0) * pf * 0.65;
+
+  // Mouse halo
   col += vec3(0.45, 0.65, 1.0) * smoothstep(0.30, 0.0, mDist) * 0.12;
   col += vec3(0.95, 0.85, 0.65) * smoothstep(0.12, 0.0, mDist) * 0.10;
 
@@ -112,7 +169,7 @@ void main() {
   float vig = smoothstep(1.20, 0.35, length(uv - 0.5));
   col *= mix(0.55, 1.0, vig);
 
-  // 8-bit dither to kill banding
+  // 8-bit dither
   float dith = (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
   col += vec3(dith);
 
