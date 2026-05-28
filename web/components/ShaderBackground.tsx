@@ -93,9 +93,7 @@ float particles(vec2 p, float t) {
 
 // ── Subtle horizon grid — distant perspective lines ───────────────────
 float horizonGrid(vec2 uv) {
-  // Only show in the lower half of the screen, fading to nothing on top
-  float depth = smoothstep(0.65, 1.0, uv.y);                  // 0 above midline, 1 at bottom
-  // Vertical lines: more frequent as we approach the bottom (perspective)
+  float depth = smoothstep(0.65, 1.0, uv.y);
   float density = mix(8.0, 28.0, depth);
   vec2 g = abs(fract(vec2(uv.x * density, uv.y * 14.0)) - 0.5);
   float line = max(
@@ -103,6 +101,66 @@ float horizonGrid(vec2 uv) {
     smoothstep(0.49, 0.50, 0.5 - g.y)
   );
   return line * depth * 0.18;
+}
+
+// ── Distant starfield — sparse, twinkling pinpoint stars ──────────────
+float starfield(vec2 p, float t) {
+  // Spatial hash on a fine grid → sparse, random star placement
+  vec2 g = floor(p * 80.0);
+  vec2 r = fract(sin(vec2(dot(g, vec2(127.1, 311.7)),
+                          dot(g, vec2(269.5, 183.3)))) * 43758.5453);
+  // Only ~4 % of cells get a star
+  if (r.x < 0.96) return 0.0;
+  vec2 cellCenter = (g + r) / 80.0;
+  float d = length(p - cellCenter);
+  // Each star twinkles with its own phase + speed
+  float twinkle = 0.4 + 0.6 * sin(t * (1.0 + r.y * 2.5) + r.x * 6.28);
+  return smoothstep(0.008, 0.0, d) * twinkle;
+}
+
+// ── God rays — vertical light curtains descending from above ──────────
+float godRays(vec2 uv, float t) {
+  float r = 0.0;
+  // 4 ray columns at different x positions, each pulsing on its own phase
+  for (int i = 0; i < 4; i++) {
+    float fi = float(i);
+    float x = 0.18 + 0.22 * fi + 0.04 * sin(t * 0.3 + fi * 1.3);
+    float dx = uv.x - x;
+    float bell = exp(-dx * dx * 220.0);            // narrow vertical bell
+    float falloff = mix(0.25, 1.0, 1.0 - uv.y);    // brightest at top
+    float pulse = 0.55 + 0.45 * sin(t * 0.7 + fi * 1.9);
+    r += bell * falloff * pulse;
+  }
+  return r * 0.16;
+}
+
+// ── Comet — a periodic streak that crosses the screen every ~14 s ─────
+float comet(vec2 uv, float t) {
+  float cycle = 14.0;
+  float local = mod(t + 3.0, cycle);
+  // Visible for 2.6 s of the cycle
+  if (local > 2.6) return 0.0;
+  float phase = local / 2.6;
+  // Diagonal sweep across the screen
+  vec2 a = vec2(-0.15,  0.78);
+  vec2 b = vec2( 1.15,  0.18);
+  vec2 head = mix(a, b, phase);
+  vec2 dir  = normalize(b - a);
+
+  vec2  rel    = uv - head;
+  // Project pixel onto the line behind the head
+  float along  = dot(rel, -dir);
+  vec2  perpV  = rel + dir * along;
+  float perp   = length(perpV);
+
+  // Bright head + tapered trail behind it
+  float headBlob = smoothstep(0.012, 0.0, length(rel));
+  float trail    = step(0.0, along)
+                 * smoothstep(0.004, 0.0, perp)
+                 * smoothstep(0.30,  0.0, along);
+  // Fade in / out at the boundaries of the visible window
+  float window = smoothstep(0.0, 0.15, phase) * smoothstep(1.0, 0.85, phase);
+  return (headBlob * 1.6 + trail) * window;
 }
 
 void main() {
@@ -151,7 +209,15 @@ void main() {
   col = mix(col, violet,  smoothstep( 0.55, 0.85, f) * 0.50);
   col = mix(col, gold,    smoothstep( 0.78, 0.95, f) * 0.22);
 
-  // Caustics add bright sinuous highlights — like sunlight through water
+  // ── Far-field starfield (parallax: very slow drift on time) ─────────
+  vec2 starP = p + vec2(u_time * 0.005, -u_time * 0.003);
+  float sf = starfield(starP, u_time);
+  col += vec3(0.85, 0.92, 1.0) * sf;
+
+  // ── God rays — vertical light curtains descending from above ────────
+  col += vec3(0.5, 0.7, 1.0) * godRays(uv, u_time);
+
+  // Caustics — like sunlight through water
   col += vec3(0.45, 0.75, 1.0) * caust * 0.22;
 
   // Subtle horizon grid — architectural depth cue near the bottom
@@ -161,9 +227,19 @@ void main() {
   float pf = particles(p + warpVec * 0.3, u_time);
   col += vec3(0.7, 0.9, 1.0) * pf * 0.65;
 
+  // ── Periodic comet streak — a "story moment" every ~14 s ────────────
+  float cm = comet(uv, u_time);
+  col += vec3(1.0, 0.95, 0.85) * cm * 0.85;
+  // Soft halo around the comet head
+  col += vec3(0.7, 0.85, 1.0) * cm * 0.35;
+
   // Mouse halo
   col += vec3(0.45, 0.65, 1.0) * smoothstep(0.30, 0.0, mDist) * 0.12;
   col += vec3(0.95, 0.85, 0.65) * smoothstep(0.12, 0.0, mDist) * 0.10;
+
+  // ── Breathing pulse — gentle global modulation, ~6 s period ─────────
+  float breath = 0.92 + 0.08 * sin(u_time * 1.05);
+  col *= breath;
 
   // Vignette
   float vig = smoothstep(1.20, 0.35, length(uv - 0.5));
