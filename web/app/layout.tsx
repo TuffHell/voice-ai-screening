@@ -1,8 +1,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import AuroraBase  from "@/components/AuroraBase";
-import FluidCanvas from "@/components/FluidCanvas";
+import ShaderBackground from "@/components/ShaderBackground";
 
 export const metadata: Metadata = {
   title: "Voice AI — Clinical Speech Screening",
@@ -14,8 +13,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <AuroraBase />
-        <FluidCanvas />
+        <ShaderBackground />
         {children}
       </body>
     </html>
