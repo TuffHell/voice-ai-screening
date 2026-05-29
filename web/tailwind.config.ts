@@ -46,6 +46,7 @@ const config: Config = {
         "pulse-soft":  "pulse-soft 2.6s ease-in-out infinite",
         "shimmer":     "shimmer 1.8s linear infinite",
         "scroll-cue":  "scroll-cue 1.8s ease-in-out infinite",
+        "kenburns":    "kenburns 38s ease-in-out infinite alternate",
       },
       keyframes: {
         rise:  { from: { opacity: "0", transform: "translateY(12px)" }, to: { opacity: "1", transform: "translateY(0)" } },
@@ -57,6 +58,10 @@ const config: Config = {
         "scroll-cue": {
           "0%":   { transform: "translateY(-100%)" },
           "100%": { transform: "translateY(300%)" },
+        },
+        kenburns: {
+          "0%":   { transform: "scale(1.06) translate(0%, 0%)" },
+          "100%": { transform: "scale(1.16) translate(-1.5%, -2%)" },
         },
       },
     },
