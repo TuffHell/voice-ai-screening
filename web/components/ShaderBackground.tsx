@@ -58,63 +58,99 @@ float fbm(vec2 p) {
   return v;
 }
 
-// ── Vertical light-curtain field ──────────────────────────────────────
-// x heavily stretched → thin vertical streaks; y scrolls downward over
-// time so the light "rains". Powered + lifted into crisp bright filaments.
-float curtain(vec2 uv, float t, float xscale, float speed) {
-  vec2 sp = vec2(uv.x * xscale, uv.y * 2.4 - t * speed);
-  float n = fbm(sp);
-  n = smoothstep(0.02, 0.72, n);   // lift midtones
-  n = pow(n, 2.6);                 // sharpen into bright thin filaments
-  return n;
+// ── Arched conservatory roof structure (silhouette mullions) ──────────
+// Nested arches converging on an apex high above → reads as a glasshouse
+// ceiling receding into depth. Returns 0..1 darkening for the iron ribs.
+float archMullions(vec2 uv, float aspect) {
+  vec2 a = vec2((uv.x - 0.5) * aspect, uv.y - 1.18);  // apex high above frame
+  float r = length(a);
+  // concentric arch ribs, denser toward the apex (perspective)
+  float ribs = abs(sin(r * 13.0));
+  ribs = smoothstep(0.92, 1.0, ribs);
+  // radial glazing bars
+  float ang = atan(a.x, -a.y);
+  float bars = abs(sin(ang * 9.0));
+  bars = smoothstep(0.96, 1.0, bars);
+  float structure = max(ribs, bars);
+  // only in the upper half, fading down
+  return structure * smoothstep(0.35, 0.95, uv.y);
 }
 
 void main() {
   vec2 uv = v_uv;                  // 0 bottom-left → 1 top-right
   float t = u_time;
   vec2  m = u_mouse;               // y already flipped (1 = top)
+  float aspect = u_res.x / u_res.y;
 
-  // Curtain concentrates in a central vertical band that sways with cursor X
-  float center = 0.5 + (m.x - 0.5) * 0.14;
-  float dx     = uv.x - center;
-  float band   = exp(-dx * dx * 5.0);
+  // ── Base: a glowing glasshouse — deep green floor → luminous green light
+  vec3 deep   = vec3(0.030, 0.085, 0.060);
+  vec3 midG   = vec3(0.075, 0.215, 0.140);
+  vec3 sunlit = vec3(0.620, 0.700, 0.360);   // warm sunlit green at the glass
+  vec3 col = mix(deep, midG, smoothstep(0.0, 0.55, uv.y));
+  col = mix(col, sunlit, smoothstep(0.45, 1.05, uv.y) * 0.85);
 
-  // Two streak layers at different scales/speeds → depth
-  float s = curtain(uv, t, 46.0, 1.05) * 0.80
-          + curtain(uv, t, 88.0, 1.70) * 0.45;
+  // ── Sun position high in the glass, drifts gently + with cursor ──────
+  vec2 lightPos = vec2(0.62 + (m.x - 0.5) * 0.22 + sin(t * 0.05) * 0.04,
+                       1.02 + sin(t * 0.07) * 0.02);
 
-  // Vertical shaping: emerge softly at the top, intensify lower down
-  float topFade = smoothstep(1.04, 0.50, uv.y);
-  s *= band * topFade;
+  // ── Volumetric god rays streaming down from the sun ──────────────────
+  // March from the pixel toward the light, accumulating brightness with a
+  // shaft pattern that shimmers over time → the signature serene sunbeams.
+  vec2 delta = (uv - lightPos) / 26.0;
+  vec2 s = uv;
+  float illum = 1.0;
+  float rays = 0.0;
+  for (int i = 0; i < 26; i++) {
+    s -= delta;
+    float ang = atan(s.x - lightPos.x, -(s.y - lightPos.y));
+    // angular shafts, animated; modulated by soft noise for organic flicker
+    float shaft = 0.55 + 0.45 * sin(ang * 26.0 + sin(t * 0.5) * 2.0);
+    shaft *= 0.7 + 0.3 * fbm(s * 6.0 + vec2(0.0, t * 0.3));
+    float near = smoothstep(0.75, 0.0, length(s - lightPos));
+    rays += shaft * near * illum;
+    illum *= 0.95;
+  }
+  rays /= 26.0;
+  col += vec3(0.95, 0.97, 0.62) * rays * 1.15;
 
-  // Bright pooling "fan" where the light lands, lower-centre
-  float fanY = smoothstep(0.40, 0.02, uv.y);
-  float fan  = exp(-dx * dx * 2.6) * fanY;
+  // Soft bright bloom right around the sun
+  col += vec3(1.0, 0.98, 0.78) * smoothstep(0.4, 0.0, length(uv - lightPos)) * 0.5;
 
-  // Cursor brightens nearby streaks (and the fan beneath it)
-  float md = length(vec2(dx, uv.y - m.y));
-  float cursorGlow = exp(-md * md * 7.0);
+  // ── Conservatory glass roof structure (silhouette ribs) ──────────────
+  float arches = archMullions(uv, aspect);
+  col = mix(col, vec3(0.05, 0.12, 0.09), arches * 0.55);   // dark iron ribs
 
-  float I = s + fan * 0.95 + cursorGlow * 0.35;
+  // ── Floating pollen / dust motes drifting up through the light ───────
+  vec2 dp = vec2(uv.x * aspect * 26.0, uv.y * 26.0 - t * 0.6);
+  vec2 cell = floor(dp);
+  vec2 f = fract(dp) - 0.5;
+  vec2 rnd = hash22(cell);
+  float mote = smoothstep(0.12, 0.0, length(f - rnd * 0.3))
+             * step(0.82, fract(rnd.x * 41.0))
+             * (0.5 + 0.5 * sin(t * 1.5 + rnd.y * 6.28));
+  col += vec3(0.95, 1.0, 0.8) * mote * (0.4 + rays * 1.5);
 
-  // ── Warm gold ramp: black → deep amber → gold → white-hot ──
-  vec3 amber = vec3(0.42, 0.27, 0.10);
-  vec3 gold  = vec3(0.82, 0.63, 0.34);
-  vec3 hot   = vec3(1.00, 0.94, 0.82);
+  // ── Foliage silhouettes framing the bottom + sides (gentle sway) ─────
+  vec2 fp = vec2((uv.x - 0.5) * aspect, uv.y);
+  float sway = sin(t * 0.4 + uv.x * 6.0) * 0.015;
+  float foliage = fbm(vec2(fp.x * 3.2 + sway, fp.y * 3.2 - t * 0.03));
+  // dark leafy mass rising from the bottom edge + lower corners
+  float bottom = smoothstep(0.34, 0.0, uv.y - foliage * 0.16);
+  float corners = smoothstep(0.42, 0.0, abs(uv.x - 0.5) * aspect - 0.55) *
+                  smoothstep(0.55, 0.0, uv.y) * smoothstep(0.45, 0.75, foliage);
+  float leaf = clamp(bottom + corners, 0.0, 1.0);
+  col = mix(col, vec3(0.020, 0.070, 0.045), leaf);
+  // rim light on the foliage where the sun catches it
+  col += vec3(0.5, 0.65, 0.3) * leaf * rays * 0.6;
 
-  vec3 col = vec3(0.0);
-  col += amber * smoothstep(0.04, 0.50, I);
-  col += gold  * smoothstep(0.28, 0.92, I);
-  col += hot   * smoothstep(0.72, 1.45, I);
+  // ── Atmospheric haze toward the bright top (depth) ───────────────────
+  col = mix(col, vec3(0.45, 0.55, 0.32), smoothstep(0.8, 1.05, uv.y) * 0.18);
 
-  // Faint warm floor wash so pure black at the base isn't dead
-  col += vec3(0.055, 0.040, 0.022) * smoothstep(0.35, 0.0, uv.y);
+  // Gentle vignette
+  float vig = smoothstep(1.4, 0.35, length(uv - vec2(0.5, 0.55)));
+  col *= mix(0.7, 1.0, vig);
 
-  // Gentle vignette to hold the eye centrally
-  float vig = smoothstep(1.35, 0.30, length(uv - 0.5));
-  col *= mix(0.62, 1.0, vig);
-
-  // 8-bit dither — kills banding in the dark gradients
+  // 8-bit dither — kills banding
   float dith = (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
   col += vec3(dith);
 
