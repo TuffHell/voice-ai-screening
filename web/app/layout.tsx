@@ -1,7 +1,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import ShaderBackground from "@/components/ShaderBackground";
+import OceanScene from "@/components/OceanScene";
 
 export const metadata: Metadata = {
   title: "Voice AI — Clinical Speech Screening",
@@ -13,7 +13,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <ShaderBackground />
+        <OceanScene />
         {children}
       </body>
     </html>
