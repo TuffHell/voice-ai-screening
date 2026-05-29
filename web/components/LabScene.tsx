@@ -28,6 +28,8 @@ export default function LabScene() {
       const { EffectComposer } = await import("three/examples/jsm/postprocessing/EffectComposer.js");
       const { RenderPass } = await import("three/examples/jsm/postprocessing/RenderPass.js");
       const { UnrealBloomPass } = await import("three/examples/jsm/postprocessing/UnrealBloomPass.js");
+      const { Water } = await import("three/examples/jsm/objects/Water.js");
+      const { RoomEnvironment } = await import("three/examples/jsm/environments/RoomEnvironment.js");
       if (disposed || !mount) return;
 
       const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
@@ -55,6 +57,14 @@ export default function LabScene() {
       const fill = new THREE.DirectionalLight(0x9fe8d6, 0.5);
       fill.position.set(30, 25, 40);
       scene.add(fill);
+
+      // ── Image-based lighting — the single biggest realism win ────────
+      // A real environment map gives every material proper reflections &
+      // specular response, so surfaces read as real materials instead of
+      // flat plastic. (RoomEnvironment is a soft neutral studio IBL.)
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+      scene.environment = envTex;
 
       // Soft glow texture (backlight, motes, flower bloom, shafts)
       const makeGlow = (): T3.Texture => {
@@ -96,12 +106,14 @@ export default function LabScene() {
       // ── Arched iron-and-glass architecture, repeating down the hall ──
       const HALF_W = 42;          // hall half-width
       const APEX   = 44;          // arch apex height
+      // Real brushed metal — high metalness + env reflections (no flat emissive)
       const ironMat = new THREE.MeshStandardMaterial({
-        color: 0x2e4636, roughness: 0.55, metalness: 0.55, emissive: 0x0e1f15, emissiveIntensity: 0.15,
+        color: 0x2b4234, roughness: 0.32, metalness: 0.9, envMapIntensity: 1.1,
       });
+      // Reflective glass — picks up the environment, faint tint, no emissive
       const glassMat = new THREE.MeshStandardMaterial({
-        color: 0x8fd0a8, roughness: 0.1, metalness: 0.0,
-        transparent: true, opacity: 0.07, emissive: 0xbfe8c4, emissiveIntensity: 0.10,
+        color: 0x9ad8b4, roughness: 0.04, metalness: 0.0,
+        transparent: true, opacity: 0.12, envMapIntensity: 1.6,
         side: THREE.DoubleSide,
       });
       const archZs = [34, 6, -22, -50, -80, -112, -146, -182];
@@ -131,14 +143,24 @@ export default function LabScene() {
         rail.position.set(sx, 1, -74);
         scene.add(rail);
       }
-      // Floor
-      const floor = new THREE.Mesh(
-        new THREE.PlaneGeometry(120, 280),
-        new THREE.MeshStandardMaterial({ color: 0x182a1d, roughness: 0.9 }),
-      );
-      floor.rotation.x = -Math.PI / 2;
-      floor.position.set(0, 0, -74);
-      scene.add(floor);
+      // ── Reflective water floor — a calm conservatory reflecting pool.
+      // Same Three.js Water shader that made the ocean look real: it mirrors
+      // the arches, plants and the bright far end, with live sun glitter and
+      // gentle moving ripples. This is the "ocean realism" inside the lab.
+      const waterGeometry = new THREE.PlaneGeometry(160, 320);
+      const waterNormals = new THREE.TextureLoader().load("/waternormals.jpg", (tex) => {
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      });
+      const sunDir = sun.position.clone().normalize();
+      const waterFloor = new Water(waterGeometry, {
+        textureWidth: 512, textureHeight: 512, waterNormals,
+        sunDirection: sunDir, sunColor: 0xfff0d0, waterColor: 0x0a2a26,
+        distortionScale: 1.4,           // calm — a polished reflecting pool
+        fog: true,
+      });
+      waterFloor.rotation.x = -Math.PI / 2;
+      waterFloor.position.set(0, 0.2, -74);
+      scene.add(waterFloor);
 
       // ── Plant builders ───────────────────────────────────────────────
       const greens = [0x2f8d5e, 0x3fa776, 0x57c08a, 0x6fce98, 0x248a6a, 0x1f7a52];
@@ -158,7 +180,7 @@ export default function LabScene() {
         for (let i = 0; i < leaves; i++) {
           const col = greens[i % greens.length];
           const leaf = new THREE.Mesh(leafGeo, new THREE.MeshStandardMaterial({
-            color: col, roughness: 0.6, emissive: col, emissiveIntensity: 0.12, side: THREE.DoubleSide,
+            color: col, roughness: 0.85, metalness: 0.0, envMapIntensity: 0.6, side: THREE.DoubleSide,
           }));
           const a = (i / leaves) * Math.PI * 2;
           const tilt = 0.5 + Math.random() * 0.5;
@@ -172,7 +194,8 @@ export default function LabScene() {
           for (let i = 0; i < n; i++) {
             const col = blooms[Math.floor(Math.random() * blooms.length)];
             const fl = new THREE.Mesh(bloomGeo, new THREE.MeshStandardMaterial({
-              color: col, roughness: 0.5, emissive: col, emissiveIntensity: 0.5,
+              color: col, roughness: 0.55, metalness: 0.0, envMapIntensity: 0.8,
+              emissive: col, emissiveIntensity: 0.18,   // subtle pop, not plastic glow
             }));
             const a = Math.random() * Math.PI * 2;
             fl.position.set(Math.cos(a) * (1 + Math.random()), 5 + Math.random() * 1.5, Math.sin(a) * (1 + Math.random()));
@@ -198,7 +221,7 @@ export default function LabScene() {
           const r = 4.5 - i * 0.9;
           const cone = new THREE.Mesh(
             new THREE.ConeGeometry(r, 5, 12),
-            new THREE.MeshStandardMaterial({ color: 0x1f5a3a, roughness: 0.75, emissive: 0x0f3320, emissiveIntensity: 0.15 }),
+            new THREE.MeshStandardMaterial({ color: 0x1f5a3a, roughness: 0.88, metalness: 0.0, envMapIntensity: 0.5 }),
           );
           cone.position.y = 5 + i * 3.2;
           group.add(cone);
@@ -219,7 +242,7 @@ export default function LabScene() {
         for (let i = 0; i < 10; i++) {
           const col = greens[i % greens.length];
           const v = new THREE.Mesh(leafGeo, new THREE.MeshStandardMaterial({
-            color: col, roughness: 0.6, emissive: col, emissiveIntensity: 0.1, side: THREE.DoubleSide,
+            color: col, roughness: 0.85, metalness: 0.0, envMapIntensity: 0.6, side: THREE.DoubleSide,
           }));
           const a = (i / 10) * Math.PI * 2;
           v.position.set(Math.cos(a) * 1.4, -2.5 - Math.random() * 2.5, Math.sin(a) * 1.4);
@@ -264,7 +287,7 @@ export default function LabScene() {
       // ── A few researchers at a clean bench (mid hall) ────────────────
       const bench = new THREE.Mesh(
         new THREE.BoxGeometry(60, 3, 6),
-        new THREE.MeshStandardMaterial({ color: 0x223a2c, roughness: 0.6, metalness: 0.2 }),
+        new THREE.MeshStandardMaterial({ color: 0x1c3a30, roughness: 0.35, metalness: 0.6, envMapIntensity: 1.0 }),
       );
       bench.position.set(0, 2, -44);
       scene.add(bench);
@@ -336,6 +359,9 @@ export default function LabScene() {
       const animate = () => {
         const t = clock.getElapsedTime();
 
+        // Animate the reflective water floor (live ripples + moving sun glitter)
+        (waterFloor.material as T3.ShaderMaterial).uniforms["time"].value += 1 / 60;
+
         for (const s of shafts) s.sp.material.opacity = 0.05 + 0.05 * (0.5 + 0.5 * Math.sin(t * 0.3 + s.ph));
         for (const s of swayers) {
           s.obj.rotation.z = Math.sin(t * s.spd + s.ph) * s.amp;
@@ -376,7 +402,8 @@ export default function LabScene() {
         window.removeEventListener("resize", onResize);
         composer.dispose();
         renderer.dispose();
-        glowTex.dispose();
+        glowTex.dispose(); waterNormals.dispose(); waterGeometry.dispose();
+        envTex.dispose(); pmrem.dispose();
         leafGeo.dispose(); bloomGeo.dispose(); archGeo.dispose(); postGeo.dispose();
         if (renderer.domElement.parentNode === mount) mount.removeChild(renderer.domElement);
       };

@@ -82,43 +82,46 @@ export default function OceanScene() {
 
       // ── Floating cell / molecular nodes — bob, drift, and pulse ─────
       // Reads as biological cells suspended in a clinical fluid: each is a
-      // translucent teal sphere that breathes (scale oscillation) and carries
-      // a soft cyan beacon, suggesting living signal sources on the surface.
-      type Cell = {
-        mesh: T3.Mesh; x: number; z: number;
-        phase: number; bobAmp: number; bobSpeed: number; baseScale: number;
+      // bioluminescent markers — NO solid meshes (those read as plastic).
+      // Each marker is just a soft additive glow sprite hovering over the
+      // water plus a point light, so it shimmers and its reflection dances
+      // in the real water surface. Pure light, fully realistic.
+      const makeGlowTex = (): T3.Texture => {
+        const c = document.createElement("canvas");
+        c.width = c.height = 128;
+        const ctx = c.getContext("2d")!;
+        const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+        g.addColorStop(0, "rgba(255,255,255,1)");
+        g.addColorStop(0.3, "rgba(255,255,255,0.5)");
+        g.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128);
+        return new THREE.CanvasTexture(c);
       };
-      const cells: Cell[] = [];
-      const cellMat = new THREE.MeshStandardMaterial({
-        color: 0x0a2e34, roughness: 0.35, metalness: 0.2,
-        emissive: 0x2dd4bf, emissiveIntensity: 0.45,
-        transparent: true, opacity: 0.92,
-      });
+      const glowTex = makeGlowTex();
+
+      type Marker = { sprite: T3.Sprite; light: T3.PointLight; x: number; z: number; phase: number; speed: number; baseScale: number };
+      const markers: Marker[] = [];
       const positions: Array<[number, number]> = [
         [-60, -30], [40, -80], [-110, -140], [90, -180], [10, -50], [-30, -120],
       ];
       for (const [x, z] of positions) {
-        const baseScale = 2.0 + Math.random() * 1.6;
-        const g = new THREE.SphereGeometry(baseScale, 24, 24);
-        const mesh = new THREE.Mesh(g, cellMat);
-        mesh.position.set(x, 0, z);
-        scene.add(mesh);
-        // Soft cyan beacon at each cell
-        const light = new THREE.PointLight(0x5fe8d6, 7, 70, 2);
-        light.position.set(0, 3, 0);
-        mesh.add(light);
-        cells.push({
-          mesh, x, z,
-          phase: Math.random() * Math.PI * 2,
-          bobAmp: 1.6 + Math.random() * 1.2,
-          bobSpeed: 0.6 + Math.random() * 0.5,
-          baseScale,
-        });
+        const baseScale = 7 + Math.random() * 5;
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: glowTex, color: 0x6ff0dd, transparent: true,
+          blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.55,
+        }));
+        sprite.position.set(x, 2.5, z);
+        sprite.scale.setScalar(baseScale);
+        scene.add(sprite);
+        const light = new THREE.PointLight(0x5fe8d6, 9, 90, 2);
+        light.position.set(x, 4, z);
+        scene.add(light);
+        markers.push({ sprite, light, x, z, phase: Math.random() * 6.28, speed: 0.5 + Math.random() * 0.5, baseScale });
       }
 
-      // Ambient + cool key fill so cells read against the teal fluid
-      scene.add(new THREE.AmbientLight(0x1d6b6b, 0.4));
-      const key = new THREE.DirectionalLight(0xcdf6ff, 0.5);
+      // Cool ambient + key fill
+      scene.add(new THREE.AmbientLight(0x1d6b6b, 0.5));
+      const key = new THREE.DirectionalLight(0xcdf6ff, 0.55);
       key.position.copy(sun).multiplyScalar(100);
       scene.add(key);
 
@@ -158,12 +161,13 @@ export default function OceanScene() {
         // Animate the water surface
         water.material.uniforms["time"].value += 1 / 60;
 
-        // Bob, drift + pulse (breathe) the cell nodes
-        for (const c of cells) {
-          c.mesh.position.y = Math.sin(t * c.bobSpeed + c.phase) * c.bobAmp;
-          const pulse = 1 + 0.12 * Math.sin(t * 1.4 + c.phase);
-          c.mesh.scale.setScalar(pulse);
-          c.mesh.rotation.y += 0.0015;
+        // Bob + pulse the glow markers (light only — no plastic meshes)
+        for (const m of markers) {
+          const bob = Math.sin(t * m.speed + m.phase);
+          m.sprite.position.y = 2.5 + bob * 1.2;
+          const pulse = 0.85 + 0.25 * Math.sin(t * 1.4 + m.phase);
+          m.sprite.scale.setScalar(m.baseScale * pulse);
+          m.light.intensity = 7 + 4 * (0.5 + 0.5 * Math.sin(t * 1.4 + m.phase));
         }
 
         // Eased mouse-parallax + scroll-driven camera
@@ -193,6 +197,7 @@ export default function OceanScene() {
         renderer.dispose();
         waterGeometry.dispose();
         waterNormals.dispose();
+        glowTex.dispose();
         if (renderer.domElement.parentNode === mount) {
           mount.removeChild(renderer.domElement);
         }
