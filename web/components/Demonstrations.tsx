@@ -94,7 +94,7 @@ export default function Demonstrations() {
             onClick={() => setTab(k)}
             className={`px-4 py-2 rounded-full text-sm font-medium border transition-all
                         ${tab === k
-                          ? "bg-ice-500/15 border-ice-400/40 text-ice-100"
+                          ? "bg-gold/15 border-gold/40 text-ice-50"
                           : "bg-white/[0.03] border-white/[0.08] text-ice-100/55 hover:text-ice-100/85 hover:border-white/15"}`}
           >
             {DATA[k].title.split(" — ")[0]}

@@ -59,15 +59,15 @@ export default function HowItWorks() {
             viewport={{ once: true, margin: "-50px" }}
             transition={{ duration: 0.65, delay: i * 0.08, ease: [0.16, 1, 0.3, 1] }}
           >
-            <div className="absolute inset-0 bg-gradient-to-br from-ice-500/[0.06] to-transparent opacity-0
+            <div className="absolute inset-0 bg-gradient-to-br from-gold/[0.06] to-transparent opacity-0
                             group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
             <div className="relative">
               <div className="flex items-center gap-3">
-                <span className="w-10 h-10 rounded-xl bg-ice-500/15 border border-ice-400/25
-                                 flex items-center justify-center text-ice-300">
+                <span className="w-10 h-10 rounded-xl bg-gold/12 border border-gold/25
+                                 flex items-center justify-center text-gold-soft">
                   <s.icon className="w-5 h-5" />
                 </span>
-                <span className="text-xs font-mono tracking-widest text-ice-300/80 uppercase">
+                <span className="text-xs font-mono tracking-widest text-gold/80 uppercase">
                   {s.label}
                 </span>
               </div>

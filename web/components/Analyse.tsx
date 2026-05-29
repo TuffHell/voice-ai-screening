@@ -118,11 +118,11 @@ export default function Analyse() {
             className={`group relative overflow-hidden rounded-2xl p-8 border transition-all duration-300
                         ${status === "recording"
                           ? "border-red-400/60 bg-red-500/10"
-                          : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06] hover:border-ice-400/40"}`}
+                          : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06] hover:border-gold/40"}`}
           >
             <div className="flex flex-col items-center text-center">
               <span className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-4
-                                ${status === "recording" ? "bg-red-500/20 text-red-200" : "bg-ice-500/15 text-ice-200"}`}>
+                                ${status === "recording" ? "bg-red-500/20 text-red-200" : "bg-gold/15 text-gold-soft"}`}>
                 {status === "recording" ? <Square className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
               </span>
               <div className="font-display text-xl text-ice-50">
@@ -144,9 +144,9 @@ export default function Analyse() {
           </button>
 
           <label className="relative rounded-2xl p-8 border border-white/10 bg-white/[0.03]
-                            hover:bg-white/[0.06] hover:border-ice-400/40 transition-all duration-300
+                            hover:bg-white/[0.06] hover:border-gold/40 transition-all duration-300
                             cursor-pointer flex flex-col items-center text-center">
-            <span className="w-14 h-14 rounded-2xl bg-ice-500/15 text-ice-200 flex items-center justify-center mb-4">
+            <span className="w-14 h-14 rounded-2xl bg-gold/15 text-gold-soft flex items-center justify-center mb-4">
               <Upload className="w-6 h-6" />
             </span>
             <div className="font-display text-xl text-ice-50">Upload audio file</div>
@@ -232,8 +232,8 @@ export default function Analyse() {
 
 function ResultBlock({ r }: { r: AnalysisResponse }) {
   const confColor =
-    r.confidence_level === "high"   ? "from-ice-600/30 to-ice-400/10 border-ice-400/40" :
-    r.confidence_level === "moderate" ? "from-gold/25 to-gold/5 border-gold/30" :
+    r.confidence_level === "high"   ? "from-gold/25 to-gold/5 border-gold/40" :
+    r.confidence_level === "moderate" ? "from-gold/15 to-gold/5 border-gold/25" :
     "from-white/[0.05] to-transparent border-white/15";
   return (
     <div className="space-y-8">
@@ -258,7 +258,7 @@ function ResultBlock({ r }: { r: AnalysisResponse }) {
             <div className="font-display text-3xl text-ice-50 mt-2 mb-3">{(v * 100).toFixed(0)}<span className="text-ice-100/40 text-xl">%</span></div>
             <div className="h-1.5 rounded-full bg-white/5 overflow-hidden">
               <motion.div
-                className="h-full bg-gradient-to-r from-ice-500 to-ice-300"
+                className="h-full bg-gradient-to-r from-gold-deep to-gold-soft"
                 initial={{ width: 0 }}
                 animate={{ width: `${v * 100}%` }}
                 transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1], delay: 0.1 }}

@@ -58,59 +58,63 @@ float fbm(vec2 p) {
   return v;
 }
 
-// ── Iridescent thin-film palette (Inigo Quilez cosine-palette) ────────
-// Reads like the rainbow shift on a soap bubble's surface.
-vec3 iridescent(float t) {
-  vec3 a = vec3(0.50, 0.50, 0.50);
-  vec3 b = vec3(0.45, 0.45, 0.45);
-  vec3 c = vec3(1.00, 1.00, 1.00);
-  vec3 d = vec3(0.10, 0.33, 0.67);
-  return a + b * cos(6.28318 * (c * t + d));
+// ── Vertical light-curtain field ──────────────────────────────────────
+// x heavily stretched → thin vertical streaks; y scrolls downward over
+// time so the light "rains". Powered + lifted into crisp bright filaments.
+float curtain(vec2 uv, float t, float xscale, float speed) {
+  vec2 sp = vec2(uv.x * xscale, uv.y * 2.4 - t * speed);
+  float n = fbm(sp);
+  n = smoothstep(0.02, 0.72, n);   // lift midtones
+  n = pow(n, 2.6);                 // sharpen into bright thin filaments
+  return n;
 }
 
 void main() {
-  vec2 uv      = v_uv;
-  float aspect = u_res.x / u_res.y;
-  vec2 p       = (uv - 0.5) * vec2(aspect, 1.0);
-  vec2 mp      = (u_mouse - 0.5) * vec2(aspect, 1.0);
+  vec2 uv = v_uv;                  // 0 bottom-left → 1 top-right
+  float t = u_time;
+  vec2  m = u_mouse;               // y already flipped (1 = top)
 
-  // Soft mouse warp — pulls the field gently toward the pointer
-  vec2  toMouse = mp - p;
-  float mDist   = length(toMouse);
-  vec2  warp    = toMouse * smoothstep(0.55, 0.0, mDist) * 0.18;
+  // Curtain concentrates in a central vertical band that sways with cursor X
+  float center = 0.5 + (m.x - 0.5) * 0.14;
+  float dx     = uv.x - center;
+  float band   = exp(-dx * dx * 5.0);
 
-  float t = u_time * 0.05;
+  // Two streak layers at different scales/speeds → depth
+  float s = curtain(uv, t, 46.0, 1.05) * 0.80
+          + curtain(uv, t, 88.0, 1.70) * 0.45;
 
-  // Domain-warped, slow-evolving smooth bubble surface — three layers of
-  // mutual displacement so the field slithers organically (no straight
-  // edges, no foam, no hard transitions; everything rolls).
-  vec2 q  = vec2(fbm(p * 1.20 + vec2( t, -t * 0.6) + warp),
-                 fbm(p * 1.20 + vec2(-t * 0.7,  t * 0.8) + warp * 0.8));
-  vec2 r  = vec2(fbm(p * 1.55 + 1.6 * q + vec2( 5.2,  1.3)),
-                 fbm(p * 1.55 + 1.6 * q + vec2(-3.7,  8.4)));
-  float h = fbm(p * 1.35 + 1.4 * r + t * 0.8);
+  // Vertical shaping: emerge softly at the top, intensify lower down
+  float topFade = smoothstep(1.04, 0.50, uv.y);
+  s *= band * topFade;
 
-  // Map smoothly to thin-film iridescence
-  // The 'thickness' parameter shifts with time + a touch of position so
-  // the rainbow drifts across the field as it flows.
-  float thickness = h * 0.85 + 0.15 * length(p) + u_time * 0.025;
-  vec3 col = iridescent(thickness);
+  // Bright pooling "fan" where the light lands, lower-centre
+  float fanY = smoothstep(0.40, 0.02, uv.y);
+  float fan  = exp(-dx * dx * 2.6) * fanY;
 
-  // Pull the colour toward a deep navy base so the iridescence reads as
-  // highlights on a darker surface, not a wash.
-  vec3 base = vec3(0.020, 0.045, 0.110);
-  col = mix(base, col, 0.55 + 0.35 * smoothstep(-0.2, 0.4, h));
+  // Cursor brightens nearby streaks (and the fan beneath it)
+  float md = length(vec2(dx, uv.y - m.y));
+  float cursorGlow = exp(-md * md * 7.0);
 
-  // Soft inner glow at the mouse — like the bubble film thinning under
-  // gentle pressure where the cursor is
-  col += vec3(0.55, 0.80, 1.00) * smoothstep(0.30, 0.0, mDist) * 0.10;
-  col += vec3(0.95, 0.85, 0.75) * smoothstep(0.08, 0.0, mDist) * 0.06;
+  float I = s + fan * 0.95 + cursorGlow * 0.35;
 
-  // Vignette
-  float vig = smoothstep(1.20, 0.35, length(uv - 0.5));
-  col *= mix(0.65, 1.0, vig);
+  // ── Warm gold ramp: black → deep amber → gold → white-hot ──
+  vec3 amber = vec3(0.42, 0.27, 0.10);
+  vec3 gold  = vec3(0.82, 0.63, 0.34);
+  vec3 hot   = vec3(1.00, 0.94, 0.82);
 
-  // 8-bit dither
+  vec3 col = vec3(0.0);
+  col += amber * smoothstep(0.04, 0.50, I);
+  col += gold  * smoothstep(0.28, 0.92, I);
+  col += hot   * smoothstep(0.72, 1.45, I);
+
+  // Faint warm floor wash so pure black at the base isn't dead
+  col += vec3(0.055, 0.040, 0.022) * smoothstep(0.35, 0.0, uv.y);
+
+  // Gentle vignette to hold the eye centrally
+  float vig = smoothstep(1.35, 0.30, length(uv - 0.5));
+  col *= mix(0.62, 1.0, vig);
+
+  // 8-bit dither — kills banding in the dark gradients
   float dith = (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
   col += vec3(dith);
 
