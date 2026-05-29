@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Mic, Upload, Square, RotateCcw, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { Mic, Upload, Square, RotateCcw, Loader2, CheckCircle2, AlertCircle, Play } from "lucide-react";
 import { analyseAudio, type AnalysisResponse } from "@/lib/api";
 import { pushHistory } from "@/lib/history";
 
@@ -77,12 +77,13 @@ export default function Analyse() {
     setAudioUrl(URL.createObjectURL(file));
   };
 
-  const submit = async () => {
-    if (!audioBlob) return;
+  const submit = async (blobArg?: Blob) => {
+    const blob = blobArg ?? audioBlob;
+    if (!blob) return;
     setStatus("analysing");
     setError(null);
     try {
-      const r = await analyseAudio(audioBlob);
+      const r = await analyseAudio(blob);
       setResult(r);
       pushHistory(r);
       setStatus("done");
@@ -91,6 +92,29 @@ export default function Analyse() {
       setStatus("error");
     }
   };
+
+  // One-click: fetch a bundled clinical sample and analyse it immediately.
+  // Lets anyone without a microphone see the model work on real audio.
+  const trySample = async (slug: string) => {
+    reset();
+    try {
+      const res = await fetch(`/samples/${slug}.wav`);
+      if (!res.ok) throw new Error("sample not found");
+      const blob = await res.blob();
+      setAudioBlob(blob);
+      setAudioUrl(URL.createObjectURL(blob));
+      await submit(blob);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Could not load sample");
+      setStatus("error");
+    }
+  };
+
+  const SAMPLES: Array<{ slug: string; label: string; expect: string }> = [
+    { slug: "control_1",    label: "Healthy voice",  expect: "Control" },
+    { slug: "dysarthria_1", label: "Dysarthric",     expect: "Dysarthria" },
+    { slug: "aphasia_2",    label: "Aphasic",        expect: "Aphasia" },
+  ];
 
   return (
     <section id="analyse" className="relative px-6 sm:px-12 max-w-5xl mx-auto py-24">
@@ -104,10 +128,47 @@ export default function Analyse() {
         <h2 className="display text-4xl sm:text-5xl mt-6 mb-4 gradient-title">
           Upload or record a voice sample.
         </h2>
-        <p className="text-ice-100/65 max-w-2xl text-lg leading-relaxed mb-12">
+        <p className="text-ice-100/65 max-w-2xl text-lg leading-relaxed mb-8">
           Ten to thirty seconds of natural speech is ideal. The model adaptively
           decides which deeper analysis paths to run based on what it hears.
         </p>
+      </motion.div>
+
+      {/* Instant demo — try real clinical samples with one click */}
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, margin: "-80px" }}
+        transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+        className="mb-8"
+      >
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-[11px] uppercase tracking-[0.2em] text-gold font-medium">
+            No microphone? Try a real sample
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-3">
+          {SAMPLES.map((s) => (
+            <button
+              key={s.slug}
+              onClick={() => trySample(s.slug)}
+              disabled={status === "analysing"}
+              className="group flex items-center gap-3 pl-4 pr-5 py-3 rounded-2xl
+                         bg-white/[0.04] border border-white/[0.10]
+                         hover:bg-white/[0.08] hover:border-gold/40
+                         transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span className="w-9 h-9 rounded-xl bg-gold/15 text-gold-soft
+                               flex items-center justify-center group-hover:bg-gold/25 transition-colors">
+                <Play className="w-4 h-4" />
+              </span>
+              <span className="text-left">
+                <span className="block text-sm font-medium text-ice-50">{s.label}</span>
+                <span className="block text-[11px] text-ice-400">expects {s.expect}</span>
+              </span>
+            </button>
+          ))}
+        </div>
       </motion.div>
 
       <div className="glass-strong p-8 sm:p-12">
@@ -181,7 +242,7 @@ export default function Analyse() {
               <div className="mt-6 flex flex-wrap items-center gap-3">
                 <button
                   className="btn-primary"
-                  onClick={submit}
+                  onClick={() => submit()}
                   disabled={status === "analysing"}
                 >
                   {status === "analysing" ? (

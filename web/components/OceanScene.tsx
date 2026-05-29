@@ -122,6 +122,16 @@ export default function OceanScene() {
       };
       window.addEventListener("pointermove", onMove, { passive: true });
 
+      // ── Scroll: camera rises + tilts down as the page scrolls, so the
+      //    ocean feels physically connected to the scroll position ──────
+      let scroll = 0, scrollTarget = 0;
+      const onScroll = () => {
+        const max = Math.max(1, document.body.scrollHeight - window.innerHeight);
+        scrollTarget = Math.min(1, window.scrollY / max);
+      };
+      window.addEventListener("scroll", onScroll, { passive: true });
+      onScroll();
+
       const onResize = () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
@@ -147,13 +157,19 @@ export default function OceanScene() {
           b.mesh.rotation.y += 0.002;
         }
 
-        // Eased mouse-parallax camera
-        yaw   += (targetYaw   - yaw)   * 0.04;
-        pitch += (targetPitch - pitch) * 0.04;
-        camera.position.x = Math.sin(yaw) * 110;
-        camera.position.z = Math.cos(yaw) * 110;
-        camera.position.y = 18 + pitch * 30 + Math.sin(t * 0.15) * 2.5;
-        camera.lookAt(0, 6, -40);
+        // Eased mouse-parallax + scroll-driven camera
+        yaw    += (targetYaw    - yaw)    * 0.04;
+        pitch  += (targetPitch  - pitch)  * 0.04;
+        scroll += (scrollTarget - scroll) * 0.06;
+
+        // As you scroll: camera rises (10 → 80), dollies back (110 → 230),
+        // and a slow orbit drift sets in — the ocean opens up beneath you.
+        const orbit = yaw + scroll * 0.5;
+        const radius = 110 + scroll * 120;
+        camera.position.x = Math.sin(orbit) * radius;
+        camera.position.z = Math.cos(orbit) * radius;
+        camera.position.y = 14 + scroll * 70 + pitch * 30 + Math.sin(t * 0.15) * 2.5;
+        camera.lookAt(0, 6 - scroll * 10, -40);
 
         renderer.render(scene, camera);
         if (!reduced) raf = requestAnimationFrame(animate);
@@ -163,6 +179,7 @@ export default function OceanScene() {
       cleanup = () => {
         cancelAnimationFrame(raf);
         window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("scroll", onScroll);
         window.removeEventListener("resize", onResize);
         renderer.dispose();
         waterGeometry.dispose();
