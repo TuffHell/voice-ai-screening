@@ -32,7 +32,7 @@ export default function OceanScene() {
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 0.52;   // calm, not blown out
+      renderer.toneMappingExposure = 0.62;   // clean, luminous, not blown out
       mount.appendChild(renderer.domElement);
 
       const scene = new THREE.Scene();
@@ -53,9 +53,9 @@ export default function OceanScene() {
         textureHeight: 512,
         waterNormals,
         sunDirection: new THREE.Vector3(),
-        sunColor: 0xcdf6ff,           // cool clinical cyan-white
-        waterColor: 0x05222b,         // deep clinical teal
-        distortionScale: 3.0,
+        sunColor: 0xdff8ff,           // cool clinical cyan-white
+        waterColor: 0x0a3440,         // luminous clinical teal
+        distortionScale: 3.2,
         fog: false,
       });
       water.rotation.x = -Math.PI / 2;
@@ -175,14 +175,17 @@ export default function OceanScene() {
         pitch  += (targetPitch  - pitch)  * 0.04;
         scroll += (scrollTarget - scroll) * 0.06;
 
-        // As you scroll: camera rises (10 → 80), dollies back (110 → 230),
-        // and a slow orbit drift sets in — the ocean opens up beneath you.
-        const orbit = yaw + scroll * 0.5;
-        const radius = 110 + scroll * 120;
+        // Elegant, calm camera: a continuous slow drift + gentle mouse
+        // parallax (the motion that first impressed), with scroll adding only
+        // a graceful glide low across the water and a soft rise — never a
+        // disorienting orbit. The waves + moving sun glitter carry the scene.
+        const drift  = Math.sin(t * 0.06) * 0.18;          // slow autonomous sway
+        const orbit  = yaw * 0.8 + drift + scroll * 0.16;  // gentle
+        const radius = 116 - scroll * 18;                  // ease slightly inward
         camera.position.x = Math.sin(orbit) * radius;
         camera.position.z = Math.cos(orbit) * radius;
-        camera.position.y = 14 + scroll * 70 + pitch * 30 + Math.sin(t * 0.15) * 2.5;
-        camera.lookAt(0, 6 - scroll * 10, -40);
+        camera.position.y = 15 + scroll * 24 + pitch * 22 + Math.sin(t * 0.11) * 2.0;
+        camera.lookAt(0, 8 - scroll * 4, -28);
 
         renderer.render(scene, camera);
         if (!reduced) raf = requestAnimationFrame(animate);

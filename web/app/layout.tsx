@@ -1,7 +1,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import LabBackground  from "@/components/LabBackground";
+import OceanScene     from "@/components/OceanScene";
 import ScrollProgress from "@/components/ScrollProgress";
 
 export const metadata: Metadata = {
@@ -14,7 +14,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <LabBackground />
+        <OceanScene />
         <ScrollProgress />
         {children}
       </body>
