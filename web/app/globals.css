@@ -12,7 +12,7 @@
     letter-spacing: -0.005em;
     min-height: 100vh;
   }
-  ::selection { background: rgba(45,212,191,0.30); color: #fff; }
+  ::selection { background: rgba(201,168,106,0.30); color: #fff; }
 }
 
 @layer components {
@@ -39,7 +39,7 @@
   }
   /* The single gold accent — used on the italic headline line, key numbers */
   .gradient-accent {
-    background: linear-gradient(100deg, #7ff0e0 0%, #2dd4bf 55%, #0d9488 100%);
+    background: linear-gradient(100deg, #e6cf9c 0%, #c9a86a 55%, #9c7e44 100%);
     -webkit-background-clip: text; background-clip: text;
     -webkit-text-fill-color: transparent;
   }
@@ -69,7 +69,7 @@
   }
   .section-heading::after {
     content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px;
-    background: linear-gradient(90deg, rgba(45,212,191,0.7) 0%, rgba(255,255,255,0.04) 70%, transparent 100%);
+    background: linear-gradient(90deg, rgba(201,168,106,0.7) 0%, rgba(255,255,255,0.04) 70%, transparent 100%);
   }
   .stat-pill {
     @apply inline-flex items-center gap-2 px-3.5 py-2 rounded-full
@@ -87,5 +87,5 @@
 
 ::-webkit-scrollbar { width: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(45,212,191,0.20); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
-::-webkit-scrollbar-thumb:hover { background: rgba(45,212,191,0.38); background-clip: content-box; }
+::-webkit-scrollbar-thumb { background: rgba(201,168,106,0.20); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(201,168,106,0.38); background-clip: content-box; }

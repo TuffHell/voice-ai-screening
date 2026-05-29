@@ -32,13 +32,11 @@ const config: Config = {
           600: "#45464d",
           700: "#2c2d33",
         },
-        // The single accent — clinical medical-aqua (teal/cyan). Class names
-        // stay `gold` across components, remapped here so the whole site
-        // recolors to a biomedical palette in one place.
+        // The single accent — warm gold.
         gold: {
-          DEFAULT: "#2dd4bf",
-          soft:    "#7ff0e0",
-          deep:    "#0d9488",
+          DEFAULT: "#c9a86a",
+          soft:    "#e6cf9c",
+          deep:    "#9c7e44",
         },
       },
       animation: {
@@ -46,7 +44,6 @@ const config: Config = {
         "pulse-soft":  "pulse-soft 2.6s ease-in-out infinite",
         "shimmer":     "shimmer 1.8s linear infinite",
         "scroll-cue":  "scroll-cue 1.8s ease-in-out infinite",
-        "kenburns":    "kenburns 38s ease-in-out infinite alternate",
       },
       keyframes: {
         rise:  { from: { opacity: "0", transform: "translateY(12px)" }, to: { opacity: "1", transform: "translateY(0)" } },
@@ -58,10 +55,6 @@ const config: Config = {
         "scroll-cue": {
           "0%":   { transform: "translateY(-100%)" },
           "100%": { transform: "translateY(300%)" },
-        },
-        kenburns: {
-          "0%":   { transform: "scale(1.06) translate(0%, 0%)" },
-          "100%": { transform: "scale(1.16) translate(-1.5%, -2%)" },
         },
       },
     },

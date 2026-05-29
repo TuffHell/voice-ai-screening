@@ -32,7 +32,7 @@ export default function OceanScene() {
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 0.62;   // clean, luminous, not blown out
+      renderer.toneMappingExposure = 0.52;   // calm, not blown out
       mount.appendChild(renderer.domElement);
 
       const scene = new THREE.Scene();
@@ -53,9 +53,9 @@ export default function OceanScene() {
         textureHeight: 512,
         waterNormals,
         sunDirection: new THREE.Vector3(),
-        sunColor: 0xdff8ff,           // cool clinical cyan-white
-        waterColor: 0x0a3440,         // luminous clinical teal
-        distortionScale: 3.2,
+        sunColor: 0xffe9c0,
+        waterColor: 0x0a2a3a,        // deep teal-navy
+        distortionScale: 3.4,
         fog: false,
       });
       water.rotation.x = -Math.PI / 2;
@@ -66,62 +66,50 @@ export default function OceanScene() {
       sky.scale.setScalar(10000);
       scene.add(sky);
       const skyU = sky.material.uniforms;
-      skyU["turbidity"].value = 5;        // cleaner, less warm scatter
-      skyU["rayleigh"].value = 0.9;       // cooler sky
-      skyU["mieCoefficient"].value = 0.004;
-      skyU["mieDirectionalG"].value = 0.82;
+      skyU["turbidity"].value = 8;
+      skyU["rayleigh"].value = 1.6;
+      skyU["mieCoefficient"].value = 0.006;
+      skyU["mieDirectionalG"].value = 0.85;
 
-      // A higher, cooler sun → clean clinical light rather than warm dusk
-      const elevation = 9;     // degrees above horizon — cool daylight glow
-      const azimuth   = 200;   // degrees — light toward upper-right
+      // Low dusk sun to the right (keeps left-aligned hero text over darker water)
+      const elevation = 3.5;   // degrees above horizon — low, golden
+      const azimuth   = 215;   // degrees — sun toward upper-right
       const phi   = THREE.MathUtils.degToRad(90 - elevation);
       const theta = THREE.MathUtils.degToRad(azimuth);
       sun.setFromSphericalCoords(1, phi, theta);
       skyU["sunPosition"].value.copy(sun);
       water.material.uniforms["sunDirection"].value.copy(sun).normalize();
 
-      // ── Floating cell / molecular nodes — bob, drift, and pulse ─────
-      // Reads as biological cells suspended in a clinical fluid: each is a
-      // bioluminescent markers — NO solid meshes (those read as plastic).
-      // Each marker is just a soft additive glow sprite hovering over the
-      // water plus a point light, so it shimmers and its reflection dances
-      // in the real water surface. Pure light, fully realistic.
-      const makeGlowTex = (): T3.Texture => {
-        const c = document.createElement("canvas");
-        c.width = c.height = 128;
-        const ctx = c.getContext("2d")!;
-        const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
-        g.addColorStop(0, "rgba(255,255,255,1)");
-        g.addColorStop(0.3, "rgba(255,255,255,0.5)");
-        g.addColorStop(1, "rgba(255,255,255,0)");
-        ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128);
-        return new THREE.CanvasTexture(c);
-      };
-      const glowTex = makeGlowTex();
-
-      type Marker = { sprite: T3.Sprite; light: T3.PointLight; x: number; z: number; phase: number; speed: number; baseScale: number };
-      const markers: Marker[] = [];
+      // ── Floating buoys — bob + drift to give the scene life ─────────
+      type Buoy = { mesh: T3.Mesh; x: number; z: number; phase: number; bobAmp: number; bobSpeed: number };
+      const buoys: Buoy[] = [];
+      const buoyMat = new THREE.MeshStandardMaterial({
+        color: 0x1a1c22, roughness: 0.5, metalness: 0.3,
+        emissive: 0xc9a86a, emissiveIntensity: 0.25,
+      });
       const positions: Array<[number, number]> = [
-        [-60, -30], [40, -80], [-110, -140], [90, -180], [10, -50], [-30, -120],
+        [-60, -30], [40, -80], [-110, -140], [90, -180], [10, -50],
       ];
       for (const [x, z] of positions) {
-        const baseScale = 7 + Math.random() * 5;
-        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
-          map: glowTex, color: 0x6ff0dd, transparent: true,
-          blending: THREE.AdditiveBlending, depthWrite: false, opacity: 0.55,
-        }));
-        sprite.position.set(x, 2.5, z);
-        sprite.scale.setScalar(baseScale);
-        scene.add(sprite);
-        const light = new THREE.PointLight(0x5fe8d6, 9, 90, 2);
-        light.position.set(x, 4, z);
-        scene.add(light);
-        markers.push({ sprite, light, x, z, phase: Math.random() * 6.28, speed: 0.5 + Math.random() * 0.5, baseScale });
+        const g = new THREE.IcosahedronGeometry(2.2 + Math.random() * 1.5, 0);
+        const mesh = new THREE.Mesh(g, buoyMat);
+        mesh.position.set(x, 0, z);
+        scene.add(mesh);
+        // A tiny warm beacon light atop each buoy
+        const light = new THREE.PointLight(0xffd89b, 6, 60, 2);
+        light.position.set(0, 4, 0);
+        mesh.add(light);
+        buoys.push({
+          mesh, x, z,
+          phase: Math.random() * Math.PI * 2,
+          bobAmp: 1.6 + Math.random() * 1.2,
+          bobSpeed: 0.6 + Math.random() * 0.5,
+        });
       }
 
-      // Cool ambient + key fill
-      scene.add(new THREE.AmbientLight(0x1d6b6b, 0.5));
-      const key = new THREE.DirectionalLight(0xcdf6ff, 0.55);
+      // Ambient + key fill so buoys read against the water
+      scene.add(new THREE.AmbientLight(0x335577, 0.4));
+      const key = new THREE.DirectionalLight(0xffe9c0, 0.5);
       key.position.copy(sun).multiplyScalar(100);
       scene.add(key);
 
@@ -161,13 +149,12 @@ export default function OceanScene() {
         // Animate the water surface
         water.material.uniforms["time"].value += 1 / 60;
 
-        // Bob + pulse the glow markers (light only — no plastic meshes)
-        for (const m of markers) {
-          const bob = Math.sin(t * m.speed + m.phase);
-          m.sprite.position.y = 2.5 + bob * 1.2;
-          const pulse = 0.85 + 0.25 * Math.sin(t * 1.4 + m.phase);
-          m.sprite.scale.setScalar(m.baseScale * pulse);
-          m.light.intensity = 7 + 4 * (0.5 + 0.5 * Math.sin(t * 1.4 + m.phase));
+        // Bob + slow-spin the buoys
+        for (const b of buoys) {
+          b.mesh.position.y = Math.sin(t * b.bobSpeed + b.phase) * b.bobAmp;
+          b.mesh.rotation.x = Math.sin(t * b.bobSpeed * 0.7 + b.phase) * 0.12;
+          b.mesh.rotation.z = Math.cos(t * b.bobSpeed * 0.5 + b.phase) * 0.12;
+          b.mesh.rotation.y += 0.002;
         }
 
         // Eased mouse-parallax + scroll-driven camera
@@ -175,17 +162,14 @@ export default function OceanScene() {
         pitch  += (targetPitch  - pitch)  * 0.04;
         scroll += (scrollTarget - scroll) * 0.06;
 
-        // Elegant, calm camera: a continuous slow drift + gentle mouse
-        // parallax (the motion that first impressed), with scroll adding only
-        // a graceful glide low across the water and a soft rise — never a
-        // disorienting orbit. The waves + moving sun glitter carry the scene.
-        const drift  = Math.sin(t * 0.06) * 0.18;          // slow autonomous sway
-        const orbit  = yaw * 0.8 + drift + scroll * 0.16;  // gentle
-        const radius = 116 - scroll * 18;                  // ease slightly inward
+        // As you scroll: camera rises (10 → 80), dollies back (110 → 230),
+        // and a slow orbit drift sets in — the ocean opens up beneath you.
+        const orbit = yaw + scroll * 0.5;
+        const radius = 110 + scroll * 120;
         camera.position.x = Math.sin(orbit) * radius;
         camera.position.z = Math.cos(orbit) * radius;
-        camera.position.y = 15 + scroll * 24 + pitch * 22 + Math.sin(t * 0.11) * 2.0;
-        camera.lookAt(0, 8 - scroll * 4, -28);
+        camera.position.y = 14 + scroll * 70 + pitch * 30 + Math.sin(t * 0.15) * 2.5;
+        camera.lookAt(0, 6 - scroll * 10, -40);
 
         renderer.render(scene, camera);
         if (!reduced) raf = requestAnimationFrame(animate);
@@ -200,7 +184,6 @@ export default function OceanScene() {
         renderer.dispose();
         waterGeometry.dispose();
         waterNormals.dispose();
-        glowTex.dispose();
         if (renderer.domElement.parentNode === mount) {
           mount.removeChild(renderer.domElement);
         }

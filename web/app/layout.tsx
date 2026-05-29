@@ -1,8 +1,8 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import ShaderBackground from "@/components/ShaderBackground";
-import ScrollProgress   from "@/components/ScrollProgress";
+import OceanScene     from "@/components/OceanScene";
+import ScrollProgress from "@/components/ScrollProgress";
 
 export const metadata: Metadata = {
   title: "Voice AI — Clinical Speech Screening",
@@ -14,7 +14,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <ShaderBackground />
+        <OceanScene />
         <ScrollProgress />
         {children}
       </body>
