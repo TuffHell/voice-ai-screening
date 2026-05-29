@@ -32,11 +32,13 @@ const config: Config = {
           600: "#45464d",
           700: "#2c2d33",
         },
-        // The single accent — warm gold.
+        // The single accent — clinical medical-aqua (teal/cyan). Class names
+        // stay `gold` across components, remapped here so the whole site
+        // recolors to a biomedical palette in one place.
         gold: {
-          DEFAULT: "#c9a86a",
-          soft:    "#e6cf9c",
-          deep:    "#9c7e44",
+          DEFAULT: "#2dd4bf",
+          soft:    "#7ff0e0",
+          deep:    "#0d9488",
         },
       },
       animation: {

@@ -53,9 +53,9 @@ export default function OceanScene() {
         textureHeight: 512,
         waterNormals,
         sunDirection: new THREE.Vector3(),
-        sunColor: 0xffe9c0,
-        waterColor: 0x0a2a3a,        // deep teal-navy
-        distortionScale: 3.4,
+        sunColor: 0xcdf6ff,           // cool clinical cyan-white
+        waterColor: 0x05222b,         // deep clinical teal
+        distortionScale: 3.0,
         fog: false,
       });
       water.rotation.x = -Math.PI / 2;
@@ -66,50 +66,59 @@ export default function OceanScene() {
       sky.scale.setScalar(10000);
       scene.add(sky);
       const skyU = sky.material.uniforms;
-      skyU["turbidity"].value = 8;
-      skyU["rayleigh"].value = 1.6;
-      skyU["mieCoefficient"].value = 0.006;
-      skyU["mieDirectionalG"].value = 0.85;
+      skyU["turbidity"].value = 5;        // cleaner, less warm scatter
+      skyU["rayleigh"].value = 0.9;       // cooler sky
+      skyU["mieCoefficient"].value = 0.004;
+      skyU["mieDirectionalG"].value = 0.82;
 
-      // Low dusk sun to the right (keeps left-aligned hero text over darker water)
-      const elevation = 3.5;   // degrees above horizon — low, golden
-      const azimuth   = 215;   // degrees — sun toward upper-right
+      // A higher, cooler sun → clean clinical light rather than warm dusk
+      const elevation = 9;     // degrees above horizon — cool daylight glow
+      const azimuth   = 200;   // degrees — light toward upper-right
       const phi   = THREE.MathUtils.degToRad(90 - elevation);
       const theta = THREE.MathUtils.degToRad(azimuth);
       sun.setFromSphericalCoords(1, phi, theta);
       skyU["sunPosition"].value.copy(sun);
       water.material.uniforms["sunDirection"].value.copy(sun).normalize();
 
-      // ── Floating buoys — bob + drift to give the scene life ─────────
-      type Buoy = { mesh: T3.Mesh; x: number; z: number; phase: number; bobAmp: number; bobSpeed: number };
-      const buoys: Buoy[] = [];
-      const buoyMat = new THREE.MeshStandardMaterial({
-        color: 0x1a1c22, roughness: 0.5, metalness: 0.3,
-        emissive: 0xc9a86a, emissiveIntensity: 0.25,
+      // ── Floating cell / molecular nodes — bob, drift, and pulse ─────
+      // Reads as biological cells suspended in a clinical fluid: each is a
+      // translucent teal sphere that breathes (scale oscillation) and carries
+      // a soft cyan beacon, suggesting living signal sources on the surface.
+      type Cell = {
+        mesh: T3.Mesh; x: number; z: number;
+        phase: number; bobAmp: number; bobSpeed: number; baseScale: number;
+      };
+      const cells: Cell[] = [];
+      const cellMat = new THREE.MeshStandardMaterial({
+        color: 0x0a2e34, roughness: 0.35, metalness: 0.2,
+        emissive: 0x2dd4bf, emissiveIntensity: 0.45,
+        transparent: true, opacity: 0.92,
       });
       const positions: Array<[number, number]> = [
-        [-60, -30], [40, -80], [-110, -140], [90, -180], [10, -50],
+        [-60, -30], [40, -80], [-110, -140], [90, -180], [10, -50], [-30, -120],
       ];
       for (const [x, z] of positions) {
-        const g = new THREE.IcosahedronGeometry(2.2 + Math.random() * 1.5, 0);
-        const mesh = new THREE.Mesh(g, buoyMat);
+        const baseScale = 2.0 + Math.random() * 1.6;
+        const g = new THREE.SphereGeometry(baseScale, 24, 24);
+        const mesh = new THREE.Mesh(g, cellMat);
         mesh.position.set(x, 0, z);
         scene.add(mesh);
-        // A tiny warm beacon light atop each buoy
-        const light = new THREE.PointLight(0xffd89b, 6, 60, 2);
-        light.position.set(0, 4, 0);
+        // Soft cyan beacon at each cell
+        const light = new THREE.PointLight(0x5fe8d6, 7, 70, 2);
+        light.position.set(0, 3, 0);
         mesh.add(light);
-        buoys.push({
+        cells.push({
           mesh, x, z,
           phase: Math.random() * Math.PI * 2,
           bobAmp: 1.6 + Math.random() * 1.2,
           bobSpeed: 0.6 + Math.random() * 0.5,
+          baseScale,
         });
       }
 
-      // Ambient + key fill so buoys read against the water
-      scene.add(new THREE.AmbientLight(0x335577, 0.4));
-      const key = new THREE.DirectionalLight(0xffe9c0, 0.5);
+      // Ambient + cool key fill so cells read against the teal fluid
+      scene.add(new THREE.AmbientLight(0x1d6b6b, 0.4));
+      const key = new THREE.DirectionalLight(0xcdf6ff, 0.5);
       key.position.copy(sun).multiplyScalar(100);
       scene.add(key);
 
@@ -149,12 +158,12 @@ export default function OceanScene() {
         // Animate the water surface
         water.material.uniforms["time"].value += 1 / 60;
 
-        // Bob + slow-spin the buoys
-        for (const b of buoys) {
-          b.mesh.position.y = Math.sin(t * b.bobSpeed + b.phase) * b.bobAmp;
-          b.mesh.rotation.x = Math.sin(t * b.bobSpeed * 0.7 + b.phase) * 0.12;
-          b.mesh.rotation.z = Math.cos(t * b.bobSpeed * 0.5 + b.phase) * 0.12;
-          b.mesh.rotation.y += 0.002;
+        // Bob, drift + pulse (breathe) the cell nodes
+        for (const c of cells) {
+          c.mesh.position.y = Math.sin(t * c.bobSpeed + c.phase) * c.bobAmp;
+          const pulse = 1 + 0.12 * Math.sin(t * 1.4 + c.phase);
+          c.mesh.scale.setScalar(pulse);
+          c.mesh.rotation.y += 0.0015;
         }
 
         // Eased mouse-parallax + scroll-driven camera

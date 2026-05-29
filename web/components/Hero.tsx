@@ -16,7 +16,7 @@ export default function Hero() {
       >
         <span className="eyebrow">
           <span className="w-6 h-px bg-gold/60" />
-          A clinical voice studio · 2026
+          Biomedical voice intelligence · 2026
         </span>
       </motion.div>
 
